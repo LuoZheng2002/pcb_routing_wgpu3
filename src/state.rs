@@ -64,14 +64,14 @@ impl State {
         let delta_angle = current_time * speed;
 
         let mesh1 = RENDER_CONTEXT.with_borrow(|rc| {
-            rc.as_ref().unwrap().square_mesh.clone()
+            rc.as_ref().unwrap().circle_mesh.clone()
         });
 
         let instance1 = ShapeInstance {
             position: [0.0, 0.0, 0.0].into(),
             rotation: Quaternion::from(Euler::new(
-                cgmath::Rad(delta_angle),
-                cgmath::Rad(delta_angle),
+                cgmath::Rad(0.0),
+                cgmath::Rad(0.0),
                 cgmath::Rad(delta_angle),
             )),
             scale: cgmath::Vector3::new(scale, scale, scale),

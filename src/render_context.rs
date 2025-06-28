@@ -204,7 +204,7 @@ pub fn create_square_mesh(device: &wgpu::Device) -> Arc<ShapeMesh> {
         Vertex{position: [-0.5, -0.5, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0]},
         Vertex{position: [0.5, -0.5, 0.0], tex_coords: [1.0, 0.0], normal: [0.0, 0.0, 1.0]},
     ];
-    let indices = vec![2u32, 1u32, 3u32, 2u32, 3u32, 0u32];
+    let indices: Vec<u16> = vec![0, 1, 2, 0, 2, 3];
     let vertex_buffer = device.create_buffer_init(
         &wgpu::util::BufferInitDescriptor {
             label: Some("Square Vertex Buffer"),
@@ -227,9 +227,9 @@ pub fn create_square_mesh(device: &wgpu::Device) -> Arc<ShapeMesh> {
     Arc::new(shape_mesh)
 }
 
-pub fn create_circle_mesh(device: &wgpu::Device, segments: u32) -> Arc<ShapeMesh> {
+pub fn create_circle_mesh(device: &wgpu::Device, segments: u16) -> Arc<ShapeMesh> {
     let mut vertices = Vec::new();
-    let mut indices = Vec::new();
+    let mut indices: Vec<u16> = Vec::new();
     let radius = 0.5;
     for i in 0..segments {
         let angle = (i as f32 / segments as f32) * std::f32::consts::PI * 2.0;
