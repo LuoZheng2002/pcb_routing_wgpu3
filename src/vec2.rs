@@ -1,3 +1,5 @@
+use fixed::traits::Fixed;
+
 
 pub type FixedPoint = fixed::types::I24F8;
 
@@ -5,6 +7,15 @@ pub type FixedPoint = fixed::types::I24F8;
 pub struct FixedVec2 {
     pub x: FixedPoint,
     pub y: FixedPoint,
+}
+
+impl FixedVec2{
+    pub fn to_float(&self) -> FloatVec2 {
+        FloatVec2 {
+            x: self.x.to_num(),
+            y: self.y.to_num(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

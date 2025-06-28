@@ -94,9 +94,9 @@ impl State {
         let instance1 = ShapeInstance {
             position: [0.0, 0.0, 0.0].into(),
             rotation: Quaternion::from(Euler::new(
-                cgmath::Rad(0.0),
-                cgmath::Rad(0.0),
-                cgmath::Rad(0.0),
+                cgmath::Deg(0.0),
+                cgmath::Deg(0.0),
+                cgmath::Deg(0.0),
             )),
             scale: cgmath::Vector3::new(1.27, 1.27, 1.27),
             color: [1.0, 0.0, 0.0, 0.9],
@@ -105,9 +105,9 @@ impl State {
         let instance2 = ShapeInstance {
             position: [2.54, 0.0, 0.0].into(),
             rotation: Quaternion::from(Euler::new(
-                cgmath::Rad(0.0),
-                cgmath::Rad(0.0),
-                cgmath::Rad(0.0),
+                cgmath::Deg(0.0),
+                cgmath::Deg(0.0),
+                cgmath::Deg(0.0),
             )),
             scale: cgmath::Vector3::new(1.27, 1.27, 1.27),
             color: [1.0, 0.0, 0.0, 0.9],
@@ -117,9 +117,9 @@ impl State {
         let pcb_rect_instance = ShapeInstance {
             position: [0.0, 0.0, 0.0].into(),
             rotation: Quaternion::from(Euler::new(
-                cgmath::Rad(0.0),
-                cgmath::Rad(0.0),
-                cgmath::Rad(0.0),
+                cgmath::Deg(0.0),
+                cgmath::Deg(0.0),
+                cgmath::Deg(0.0),
             )),
             scale: cgmath::Vector3::new(self.pcb_width, self.pcb_height, 1.0),
             color: [1.0, 1.0, 1.0, 0.3],

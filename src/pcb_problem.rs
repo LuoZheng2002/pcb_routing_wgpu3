@@ -3,7 +3,7 @@
 use core::num;
 use std::{cell::RefCell, collections::{BTreeSet, HashMap, HashSet}, num::NonZeroUsize, vec};
 
-use crate::vec2::{FixedPoint, FixedVec2};
+use crate::{pad::Pad, trace_path::{TraceAnchors, TracePath}, vec2::{FixedPoint, FixedVec2}};
 
 // use shared::interface_types::{Color, ColorGrid};
 
@@ -19,18 +19,17 @@ pub struct Color{
 }
 
 #[derive(Debug, Clone)]
-pub struct ColorGrid{
-    pub grid: Vec<Vec<Color>>,
+pub struct Connection{
+    pub source: Pad,
+    pub sink: Pad,
+    pub traces: HashMap<TraceID, TraceInfo>, // List of traces connecting the source and sink pads
 }
-
 
 #[derive(Debug, Clone)]
 pub struct NetInfo{
     pub net_id: usize,
-    pub pad_character: Option<char>,
-    pub route_character: Option<char>,
-    pub pad_color: Option<Color>,
-    pub route_color: Option<Color>,
+    pub color: Color, // Color of the net
+    pub connections: Vec<Connection>, // List of connections in the net, the source pad is the same
 }
 
 #[derive(Copy, Debug, Clone, PartialEq, Hash, Eq, PartialOrd, Ord)]
@@ -46,29 +45,15 @@ pub struct TraceID(pub usize);
 pub struct PadPair{
     pub net_id: NetID,
     pub pad_pair_id: PadPairID,
-    pub start: FixedVec2, // Start point of the trace
-    pub end: FixedVec2, // End point of the trace
+    pub start: FixedPoint, // Start point of the trace
+    pub end: FixedPoint, // End point of the trace
 }
 
 
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
-pub struct Direction {
-    pub x: i32,
-    pub y: i32,
-}
 
-#[derive(Debug, Clone, PartialEq, Hash, Eq, PartialOrd, Ord)]
-pub struct TracePath{
-    pub covered: BTreeSet<FixedVec2>, // The points covered by the trace
-    pub diagonal_covered: BTreeSet<FixedVec2>, // points in the diagonal
-}
 
-impl TracePath{
-    pub fn collides_with(&self, other: &TracePath) -> bool {
-        // Check if the covered points intersect
-        !self.covered.is_disjoint(&other.covered) || !self.diagonal_covered.is_disjoint(&other.diagonal_covered)
-    }
-}
+
+
 
 
 pub struct PostProcessInput{
@@ -85,21 +70,12 @@ pub struct PostProcessInput{
 
 #[derive(Debug, Clone)]
 pub struct TraceInfo{
-    pub net_id: NetID,
-    pub pad_pair_id: PadPairID,
-    pub trace_id: TraceID,
-    pub start: FixedVec2, // Start point of the trace
-    pub end: FixedVec2, // End point of the trace
     pub trace_path: TracePath, // The path of the trace
-    pub trace_directions: Vec<Direction>, // The directions of the trace
     pub trace_length: f64, // The length of the trace
     pub iteration: NonZeroUsize, // The iteration that the trace belongs to, starting from 1
-    // probability information:
-    pub prior_probability_cache: RefCell<Option<f64>>, // Prior probability of the trace, between 0 and 1
-    pub score_cache: RefCell<Option<f64>>, // Score of the trace, between 0 and 1
-    // pub old_posterior_unnormalized: RefCell<Option<f64>>, // to be accessed in the next iteration
     pub posterior_normalized: RefCell<Option<f64>>, // to be accessed in the next iteration
     pub temp_posterior: RefCell<Option<f64>>, // serve as a buffer for simultaneous updates
+    pub collision_adjacency: HashSet<TraceID>, // The set of traces that collide with this trace
 }
 
 
@@ -194,33 +170,25 @@ pub struct PcbProblem{
     pub width: f32,
     pub height: f32,
     pub nets: HashMap<NetID, NetInfo>,
-    pub net_to_pads: HashMap<NetID, HashSet<FixedVec2>>, // NetID to list of pad coordinates
-    // output
-    pub net_to_pad_pairs: HashMap<NetID, HashSet<PadPairID>>, // NetID to PadPairToRouteID to PadPairToRoute
-    pub pad_pairs: HashMap<PadPairID, PadPair>, // PadPairToRouteID to PadPairToRoute
-    pub visited_traces: BTreeSet<TracePath>,
-    pub pad_pair_to_traces: HashMap<PadPairID, HashMap<IterationNum, HashSet<TraceID>>>, // PadPairID to TraceID
-    pub traces: HashMap<TraceID, TraceInfo>, // TraceID to Trace
-    pub trace_collision_adjacency: HashMap<TraceID, HashSet<TraceID>>,
-    
+    pub visited_traces: BTreeSet<TraceAnchors>,    
     pub next_iteration: NonZeroUsize, // The next iteration to be processed, starting from 1
     pub trace_id_generator: Box<dyn Iterator<Item=TraceID> + Send + 'static>, // A generator for TraceID, starting from 0
 }
 
 
 impl PcbProblem{
-    pub fn collides_with_border(&self){
-
+    pub fn collides_with_border(&self)->bool{
+        todo!()
     }
 
-    pub fn get_num_traces_in_the_same_iteration(&self, trace_id: TraceID)->usize{
-        let trace_info = self.traces.get(&trace_id).unwrap();
-        let pad_pair_id = trace_info.pad_pair_id;
-        let iteration_num = trace_info.iteration;
-        let num = self.pad_pair_to_traces.get(&pad_pair_id).unwrap()
-            .get(&IterationNum(iteration_num)).unwrap()
-            .len();
-        assert!(num > 0, "There should be at least one trace in the same iteration");
-        num
-    }
+    // pub fn get_num_traces_in_the_same_iteration(&self, trace_id: TraceID)->usize{
+    //     let trace_info = self.traces.get(&trace_id).unwrap();
+    //     let pad_pair_id = trace_info.pad_pair_id;
+    //     let iteration_num = trace_info.iteration;
+    //     let num = self.pad_pair_to_traces.get(&pad_pair_id).unwrap()
+    //         .get(&IterationNum(iteration_num)).unwrap()
+    //         .len();
+    //     assert!(num > 0, "There should be at least one trace in the same iteration");
+    //     num
+    // }
 }

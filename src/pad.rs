@@ -23,6 +23,5 @@ pub enum PadShape{
 pub struct Pad{
     pub position: FloatVec2,
     pub shape: PadShape,
-    pub rotation: cgmath::Rad<f32>, // Rotation in radians
-
+    pub rotation: cgmath::Deg<f32>, // Rotation in degrees
 }

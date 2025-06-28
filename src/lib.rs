@@ -14,3 +14,4 @@ pub mod pcb_problem;
 pub mod prim_shape;
 pub mod vec2;
 pub mod pad;
+pub mod trace_path;
