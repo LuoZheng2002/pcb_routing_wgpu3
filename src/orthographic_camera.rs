@@ -3,15 +3,15 @@ use cgmath::SquareMatrix;
 use crate::camera_uniform::CameraUniform;
 
 pub struct OrthographicCamera {
-    position: cgmath::Point3<f32>,
-    target: cgmath::Point3<f32>,
-    up: cgmath::Vector3<f32>,
-    left: f32,
-    right: f32,
-    bottom: f32,
-    top: f32,
-    near: f32,
-    far: f32,
+    pub position: cgmath::Point3<f32>,
+    pub target: cgmath::Point3<f32>,
+    pub up: cgmath::Vector3<f32>,
+    pub left: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub top: f32,
+    pub near: f32,
+    pub far: f32,
 }
 
 impl OrthographicCamera {

@@ -106,17 +106,29 @@ impl TransparentPipeline {
         encoder: &'a mut wgpu::CommandEncoder,
         color_view: &'a wgpu::TextureView,
         depth_view: &'a wgpu::TextureView,
+        clear_color: bool,
     ) -> wgpu::RenderPass<'a> {
+        let load_ops = if clear_color {
+            wgpu::LoadOp::Clear(wgpu::Color {
+                r: 0.1,
+                g: 0.2,
+                b: 0.3,
+                a: 1.0,
+            })
+        } else {
+            wgpu::LoadOp::Load
+        };
         let color_attachment = Some(wgpu::RenderPassColorAttachment {
             view: &color_view,
             resolve_target: None,
             ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color {
-                    r: 0.1,
-                    g: 0.2,
-                    b: 0.3,
-                    a: 1.0,
-                }),
+                // load: wgpu::LoadOp::Clear(wgpu::Color {
+                //     r: 0.1,
+                //     g: 0.2,
+                //     b: 0.3,
+                //     a: 1.0,
+                // }),
+                load: load_ops,
                 store: wgpu::StoreOp::Store,
             },
         });
@@ -150,8 +162,9 @@ impl TransparentPipeline {
         depth_view: &wgpu::TextureView,
         camera_bind_group: &wgpu::BindGroup,
     ) {
-        for batch in renderable_batches.iter() {
-            let mut render_pass = self.create_render_pass(encoder, color_view, depth_view);
+        for (idx, batch) in renderable_batches.iter().enumerate() {
+            let clear_color = if idx == 0 { true } else { false };
+            let mut render_pass = self.create_render_pass(encoder, color_view, depth_view, clear_color);
             render_pass.set_pipeline(&self.pipeline);
             //needs a texture bind group from the model
             render_pass.set_bind_group(0, camera_bind_group, &[]);

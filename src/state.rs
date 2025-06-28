@@ -16,14 +16,10 @@ pub struct State {
     pub cursor_timer: Option<Instant>,
     pub accumulated_frame_num: u32,
     pub transparent_shape_submissions: Option<Vec<TransparentShapeBatch>>,
-    // pub model_render_submissions: HashMap<ModelMeta, Vec<ShapeInstance>>,
-    // use Arc here because we need to map the container to another container
-    // pub ui_render_submissions: HashMap<TextureMeta, Vec<UIInstance>>,
-    // pub ui_render_instructions: Vec<UIRenderInstruction>,
     pub fps: u32,
 
-    // pub canvas: Option<UISpan>,
-    // pub text: Option<UIText>,
+    pub pcb_width: f32,
+    pub pcb_height: f32,
 }
 
 impl State {
@@ -58,11 +54,37 @@ impl State {
         let prev_time = self.prev_time.get_or_insert(current_time);
         let delta_time = current_time - *prev_time;
         assert!(delta_time >= 0.0);
-
-        let scale = 1.0;
         let speed = 0.1;
         let delta_angle = current_time * speed;
 
+        // update camera
+        let pcb_aspect_ratio = self.pcb_width / self.pcb_height;
+        let screen_aspect_ratio = {
+            let size = *render_context.size.borrow();
+            size.width as f32 / size.height as f32
+        };
+        let pcb_margin_scale: f32 = 1.2;
+        let (orthographic_width, orthographic_height) = {
+            if pcb_aspect_ratio > screen_aspect_ratio {
+                let orthographic_width = self.pcb_width * pcb_margin_scale;
+                let orthographic_height = orthographic_width / screen_aspect_ratio;
+                (orthographic_width, orthographic_height)            
+            }else{
+                let orthographic_height = self.pcb_height * pcb_margin_scale;
+                let orthographic_width = orthographic_height * screen_aspect_ratio;
+                (orthographic_width, orthographic_height)
+            }
+        };
+        // the top left corner of the PCB is (0, 0) in world space
+        // self.camera.left = -orthographic_width / 2.0 + self.pcb_width / 2.0;
+        // self.camera.right = orthographic_width / 2.0 + self.pcb_width / 2.0;
+        // self.camera.bottom = -orthographic_height / 2.0 + self.pcb_height / 2.0;
+        // self.camera.top = orthographic_height / 2.0 + self.pcb_height / 2.0;
+        self.camera.left = -orthographic_width / 2.0;
+        self.camera.right = orthographic_width / 2.0;
+        self.camera.bottom = -orthographic_height / 2.0;
+        self.camera.top = orthographic_height / 2.0;
+        // render submissions
         let mesh1 = render_context.circle_mesh.clone();
 
         let instance1 = ShapeInstance {
@@ -72,50 +94,41 @@ impl State {
                 cgmath::Rad(0.0),
                 cgmath::Rad(delta_angle),
             )),
-            scale: cgmath::Vector3::new(scale, scale, scale),
+            scale: cgmath::Vector3::new(1.27, 1.27, 1.27),
             color: [1.0, 0.0, 0.0, 0.5],
         };
 
-        let transparent_shape_batch = TransparentShapeBatch(
-            vec![(mesh1, vec![instance1])],
+        let instance2 = ShapeInstance {
+            position: [2.54, 0.0, 0.0].into(),
+            rotation: Quaternion::from(Euler::new(
+                cgmath::Rad(0.0),
+                cgmath::Rad(0.0),
+                cgmath::Rad(delta_angle),
+            )),
+            scale: cgmath::Vector3::new(1.27, 1.27, 1.27),
+            color: [1.0, 0.0, 0.0, 0.5],
+        };
+
+
+        let pcb_rect_mesh = render_context.square_mesh.clone();
+        let pcb_rect_instance = ShapeInstance {
+            position: [0.0, 0.0, 0.0].into(),
+            rotation: Quaternion::from(Euler::new(
+                cgmath::Rad(0.0),
+                cgmath::Rad(0.0),
+                cgmath::Rad(0.0),
+            )),
+            scale: cgmath::Vector3::new(self.pcb_width, self.pcb_height, 1.0),
+            color: [1.0, 1.0, 1.0, 0.3],
+        };
+        let pcb_rect_batch = TransparentShapeBatch(
+            vec![(pcb_rect_mesh, vec![pcb_rect_instance])],
         );
-
-        self.transparent_shape_submissions = Some(vec![transparent_shape_batch]);
-        
-
-        // let instance1 = ShapeInstance {
-        //     position: [-1.0, 0.0, 0.0].into(),
-        //     rotation: Quaternion::from(Euler::new(
-        //         cgmath::Rad(delta_angle),
-        //         cgmath::Rad(delta_angle),
-        //         cgmath::Rad(delta_angle),
-        //     )),
-        //     scale: cgmath::Vector3::new(scale, scale, scale),
-        // };
-        // let instance2 = ShapeInstance {
-        //     position: [1.0, 0.0, 0.0].into(),
-        //     rotation: Quaternion::from(Euler::new(
-        //         cgmath::Rad(-delta_angle),
-        //         cgmath::Rad(delta_angle),
-        //         cgmath::Rad(-delta_angle),
-        //     )),
-        //     scale: cgmath::Vector3::new(scale, scale, scale),
-        // };
-        // self.submit_renderable(model_meta.clone(), instance1);
-        // self.submit_renderable(model_meta.clone(), instance2);
-
-        // let ui_meta1 = UIRenderableMeta::Font { character: 'F' };
-        // let ui_instance1 = UIInstance {
-        //     color: cgmath::Vector4::new(1.0, 0.0, 1.0, 1.0),
-        //     location: [-0.2, 0.9, 0.7, -0.1],
-        //     sort_order: 0,
-        //     use_texture: true,
-        // };
-        // self.submit_ui_renderable(ui_meta1, ui_instance1);
-
-        // to do
-        // panic!()
-
+        let pad_batch = TransparentShapeBatch(
+            vec![(mesh1, vec![instance1, instance2])],
+        );
+        self.transparent_shape_submissions = Some(vec![pcb_rect_batch, pad_batch]);
+        // self.transparent_shape_submissions = Some(vec![pcb_rect_batch]);
     }
 }
 
@@ -140,41 +153,8 @@ impl Default for State {
             accumulated_frame_num: 0,
             transparent_shape_submissions: None,
             fps: 0,
+            pcb_width: 152.4, // 6 inches in mm
+            pcb_height: 101.6, // 4 inches in mm
         }
     }
 }
-
-
-
-// if use event or callback, need mutable shared reference.
-// if use traversal, do not need shared reference, but is hard to communicate between each component.
-// mouse event needs to specify layers, distributive calculation.
-// pure tree -> component models with states (here we update the states) -> renderables
-// length formula + dependencies -> actual length, manual override
-// update actual length
-
-// traverse twice to send mouse events.
-
-// the first time gathers all elements that responds to the mouse event
-// the second time notifies the one that wins the bid
-// (actually, we hardly have any circumstances where we have competing elements)
-
-// priority: bound > coop > manual override = preferred
-
-// manual override will report a length, and the elements on the direction of the modification will be affected.
-// the total least bound of all the elements will be calculated, if the least bound is greater than the target one, it will limit the manual override
-// if the target length is less than the least bound, the changes will be applied to all the elements as uniformly as possible.
-
-// so we have actual start point, actual end point, etc. preferred length, lower bound, upper bound, ...
-
-// if one bound is not satisfied (actual length too small), then it will try to subtract length from other elements.
-// other elements will report the actual length they have reduced
-
-// only parents are allowed to change size
-// child does not need to react to parents
-// the split of a span can be moved around (min, max, preferred for each cell of a span)
-// so, a span should have its elements uniformly distributed
-// parents should never try to fit children
-// if we want parents to fit children, we can set the length of the children to be the same as the parents
-// if the children fails to fit, ...
-// do not consider different resolution / screen size
