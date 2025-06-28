@@ -23,7 +23,6 @@ pub enum TextureSource {
 }
 
 impl MyTexture {
-    
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float; // 1.
 
     pub fn create_depth_texture(

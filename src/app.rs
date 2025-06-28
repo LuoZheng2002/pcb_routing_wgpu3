@@ -8,7 +8,12 @@ use winit::{
     window::{Window, WindowAttributes, WindowId},
 };
 
-use crate::{context::Context, input_context::{self, InputContext}, render_context::{self, RenderContext}, state::State};
+use crate::{
+    context::Context,
+    input_context::{self, InputContext},
+    render_context::{self, RenderContext},
+    state::State,
+};
 
 // thread_local! {
 //     pub static RENDER_CONTEXT: RefCell<Option<RenderContext>> = RefCell::new(None);

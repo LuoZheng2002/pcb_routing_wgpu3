@@ -1,9 +1,17 @@
-use std::{collections::HashMap, sync::{Arc, Mutex}, time::Instant};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 use cgmath::{Euler, Quaternion};
 use wgpu::util::DeviceExt;
 
-use crate::{input_context::InputContext, orthographic_camera::OrthographicCamera, render_context::RenderContext, shape_instance::ShapeInstance, shape_mesh::ShapeMesh, transparent_pipeline::TransparentShapeBatch, vertex::Vertex};
+use crate::{
+    input_context::InputContext, orthographic_camera::OrthographicCamera,
+    render_context::RenderContext, shape_instance::ShapeInstance, shape_mesh::ShapeMesh,
+    transparent_pipeline::TransparentShapeBatch, vertex::Vertex,
+};
 
 // model path,
 pub struct State {
@@ -23,11 +31,7 @@ pub struct State {
 }
 
 impl State {
-    
-
-    pub fn init(&mut self) {
-        
-    }
+    pub fn init(&mut self) {}
 
     pub fn update(&mut self, render_context: &RenderContext) {
         // calculate fps every 1 second
@@ -38,7 +42,7 @@ impl State {
             println!("FPS: {}", self.accumulated_frame_num);
             self.fps = self.accumulated_frame_num;
             self.accumulated_frame_num = 0;
-            *fps_timer = Instant::now();        
+            *fps_timer = Instant::now();
         } else {
             self.accumulated_frame_num += 1;
         }
@@ -68,8 +72,8 @@ impl State {
             if pcb_aspect_ratio > screen_aspect_ratio {
                 let orthographic_width = self.pcb_width * pcb_margin_scale;
                 let orthographic_height = orthographic_width / screen_aspect_ratio;
-                (orthographic_width, orthographic_height)            
-            }else{
+                (orthographic_width, orthographic_height)
+            } else {
                 let orthographic_height = self.pcb_height * pcb_margin_scale;
                 let orthographic_width = orthographic_height * screen_aspect_ratio;
                 (orthographic_width, orthographic_height)
@@ -92,10 +96,10 @@ impl State {
             rotation: Quaternion::from(Euler::new(
                 cgmath::Rad(0.0),
                 cgmath::Rad(0.0),
-                cgmath::Rad(delta_angle),
+                cgmath::Rad(0.0),
             )),
             scale: cgmath::Vector3::new(1.27, 1.27, 1.27),
-            color: [1.0, 0.0, 0.0, 0.5],
+            color: [1.0, 0.0, 0.0, 0.9],
         };
 
         let instance2 = ShapeInstance {
@@ -103,12 +107,11 @@ impl State {
             rotation: Quaternion::from(Euler::new(
                 cgmath::Rad(0.0),
                 cgmath::Rad(0.0),
-                cgmath::Rad(delta_angle),
+                cgmath::Rad(0.0),
             )),
             scale: cgmath::Vector3::new(1.27, 1.27, 1.27),
-            color: [1.0, 0.0, 0.0, 0.5],
+            color: [1.0, 0.0, 0.0, 0.9],
         };
-
 
         let pcb_rect_mesh = render_context.square_mesh.clone();
         let pcb_rect_instance = ShapeInstance {
@@ -121,12 +124,8 @@ impl State {
             scale: cgmath::Vector3::new(self.pcb_width, self.pcb_height, 1.0),
             color: [1.0, 1.0, 1.0, 0.3],
         };
-        let pcb_rect_batch = TransparentShapeBatch(
-            vec![(pcb_rect_mesh, vec![pcb_rect_instance])],
-        );
-        let pad_batch = TransparentShapeBatch(
-            vec![(mesh1, vec![instance1, instance2])],
-        );
+        let pcb_rect_batch = TransparentShapeBatch(vec![(pcb_rect_mesh, vec![pcb_rect_instance])]);
+        let pad_batch = TransparentShapeBatch(vec![(mesh1, vec![instance1, instance2])]);
         self.transparent_shape_submissions = Some(vec![pcb_rect_batch, pad_batch]);
         // self.transparent_shape_submissions = Some(vec![pcb_rect_batch]);
     }
@@ -153,8 +152,8 @@ impl Default for State {
             accumulated_frame_num: 0,
             transparent_shape_submissions: None,
             fps: 0,
-            pcb_width: 152.4, // 6 inches in mm
-            pcb_height: 101.6, // 4 inches in mm
+            pcb_width: 15.0,
+            pcb_height: 10.0,
         }
     }
 }

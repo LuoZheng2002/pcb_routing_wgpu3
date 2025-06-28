@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone)]
 pub struct ShapeMesh {
     pub vertex_buffer: wgpu::Buffer,

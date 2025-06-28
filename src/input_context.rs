@@ -113,7 +113,10 @@ impl InputContext {
                     _ => {}
                 }
             }
-            WindowEvent::CursorMoved { device_id: _, position }=> {
+            WindowEvent::CursorMoved {
+                device_id: _,
+                position,
+            } => {
                 self.cursor_position = Some((position.x, position.y));
             }
             _ => {}

@@ -1,13 +1,22 @@
-use std::{cell::{Ref, RefCell}, collections::HashMap, mem, sync::Arc};
+use std::{
+    cell::{Ref, RefCell},
+    collections::HashMap,
+    mem,
+    sync::Arc,
+};
 
-use wgpu::{util::DeviceExt, CompositeAlphaMode, PollType};
+use wgpu::{CompositeAlphaMode, PollType, util::DeviceExt};
 use winit::window::Window;
 
 use crate::{
     // model_data::MyMesh,
     // model_instance::ModelInstance,
-    camera_uniform::CameraUniform, my_texture::MyTexture, shape_mesh::ShapeMesh, state::State, transparent_pipeline::{self, TransparentPipeline}, vertex::Vertex
-    // ui_pipeline::UIPipeline,
+    camera_uniform::CameraUniform,
+    my_texture::MyTexture,
+    shape_mesh::ShapeMesh,
+    state::State,
+    transparent_pipeline::{self, TransparentPipeline},
+    vertex::Vertex, // ui_pipeline::UIPipeline,
 };
 
 pub struct RenderContext {
@@ -17,11 +26,11 @@ pub struct RenderContext {
     pub config: RefCell<wgpu::SurfaceConfiguration>,
     pub size: RefCell<winit::dpi::PhysicalSize<u32>>,
     pub depth_texture: RefCell<MyTexture>,
-    pub transparent_pipeline: TransparentPipeline,    
+    pub transparent_pipeline: TransparentPipeline,
     pub camera_buffer: wgpu::Buffer,
     pub camera_bind_group_layout: wgpu::BindGroupLayout,
     pub camera_bind_group: wgpu::BindGroup,
-    
+
     pub square_mesh: Arc<ShapeMesh>,
     pub circle_mesh: Arc<ShapeMesh>,
 }
@@ -38,22 +47,22 @@ impl RenderContext {
         // surface only depends on window
         let surface = instance.create_surface(window).unwrap();
         // adapter represents a GPU
-        let adapter = futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        let adapter =
+            futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             }))
             .unwrap();
 
-        let (device, queue) = futures::executor::block_on(adapter.request_device(
-                &wgpu::DeviceDescriptor {
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                    label: None,
-                    memory_hints: Default::default(),
-                    trace: wgpu::Trace::Off,
-                },
-            ))
+        let (device, queue) =
+            futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                label: None,
+                memory_hints: Default::default(),
+                trace: wgpu::Trace::Off,
+            }))
             .unwrap();
 
         let surface_caps = surface.get_capabilities(&adapter);
@@ -79,7 +88,7 @@ impl RenderContext {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        
+
         let camera_uniform = CameraUniform::default();
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -195,31 +204,41 @@ impl RenderContext {
     }
 }
 
-
-
 pub fn create_square_mesh(device: &wgpu::Device) -> Arc<ShapeMesh> {
     let vertices = vec![
-        Vertex{position: [0.5, 0.5, 0.0], tex_coords: [1.0, 1.0], normal: [0.0, 0.0, 1.0]},
-        Vertex{position: [-0.5, 0.5, 0.0], tex_coords: [0.0, 1.0], normal: [0.0, 0.0, 1.0]},
-        Vertex{position: [-0.5, -0.5, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0]},
-        Vertex{position: [0.5, -0.5, 0.0], tex_coords: [1.0, 0.0], normal: [0.0, 0.0, 1.0]},
+        Vertex {
+            position: [0.5, 0.5, 0.0],
+            tex_coords: [1.0, 1.0],
+            normal: [0.0, 0.0, 1.0],
+        },
+        Vertex {
+            position: [-0.5, 0.5, 0.0],
+            tex_coords: [0.0, 1.0],
+            normal: [0.0, 0.0, 1.0],
+        },
+        Vertex {
+            position: [-0.5, -0.5, 0.0],
+            tex_coords: [0.0, 0.0],
+            normal: [0.0, 0.0, 1.0],
+        },
+        Vertex {
+            position: [0.5, -0.5, 0.0],
+            tex_coords: [1.0, 0.0],
+            normal: [0.0, 0.0, 1.0],
+        },
     ];
     let indices: Vec<u16> = vec![0, 1, 2, 0, 2, 3];
-    let vertex_buffer = device.create_buffer_init(
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Square Vertex Buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        },        
-    );
-    let index_buffer = device.create_buffer_init(
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Square Index Buffer"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        },
-    );
-    let shape_mesh = ShapeMesh{
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Square Vertex Buffer"),
+        contents: bytemuck::cast_slice(&vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Square Index Buffer"),
+        contents: bytemuck::cast_slice(&indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    let shape_mesh = ShapeMesh {
         vertex_buffer,
         index_buffer,
         num_indices: indices.len() as u32,
@@ -235,7 +254,11 @@ pub fn create_circle_mesh(device: &wgpu::Device, segments: u16) -> Arc<ShapeMesh
         let angle = (i as f32 / segments as f32) * std::f32::consts::PI * 2.0;
         let x = radius * angle.cos();
         let y = radius * angle.sin();
-        vertices.push(Vertex{position: [x, y, 0.0], tex_coords: [0.0, 0.0], normal: [0.0, 0.0, 1.0]});
+        vertices.push(Vertex {
+            position: [x, y, 0.0],
+            tex_coords: [0.0, 0.0],
+            normal: [0.0, 0.0, 1.0],
+        });
         if i > 1 {
             indices.push(0);
             indices.push(i - 1);
@@ -247,21 +270,17 @@ pub fn create_circle_mesh(device: &wgpu::Device, segments: u16) -> Arc<ShapeMesh
     indices.push(segments - 1);
     indices.push(1);
 
-    let vertex_buffer = device.create_buffer_init(
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Circle Vertex Buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        },        
-    );
-    let index_buffer = device.create_buffer_init(
-        &wgpu::util::BufferInitDescriptor {
-            label: Some("Circle Index Buffer"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        },
-    );
-    let shape_mesh = ShapeMesh{
+    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Circle Vertex Buffer"),
+        contents: bytemuck::cast_slice(&vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Circle Index Buffer"),
+        contents: bytemuck::cast_slice(&indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    let shape_mesh = ShapeMesh {
         vertex_buffer,
         index_buffer,
         num_indices: indices.len() as u32,

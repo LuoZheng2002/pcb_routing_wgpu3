@@ -55,7 +55,7 @@ impl OrthographicCamera {
         )
     }
 
-    pub fn to_uniform(&self)->CameraUniform {
+    pub fn to_uniform(&self) -> CameraUniform {
         let proj_matrix = self.get_proj_matrix();
         let view_matrix = self.get_view_matrix();
         let view_proj = proj_matrix * view_matrix;
@@ -66,7 +66,14 @@ impl OrthographicCamera {
 }
 
 // Helper function to create orthographic projection matrix
-fn ortho(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) -> cgmath::Matrix4<f32> {
+fn ortho(
+    left: f32,
+    right: f32,
+    bottom: f32,
+    top: f32,
+    near: f32,
+    far: f32,
+) -> cgmath::Matrix4<f32> {
     let mut matrix = cgmath::Matrix4::identity();
 
     matrix[0][0] = 2.0 / (right - left);

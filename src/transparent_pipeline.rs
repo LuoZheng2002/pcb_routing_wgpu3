@@ -6,7 +6,10 @@ use std::sync::Arc;
 use wgpu::{RenderPipeline, util::DeviceExt};
 
 use crate::{
-    my_texture::MyTexture, shape_instance::{ModelInstanceRaw, ShapeInstance}, shape_mesh::ShapeMesh, vertex::Vertex
+    my_texture::MyTexture,
+    shape_instance::{ModelInstanceRaw, ShapeInstance},
+    shape_mesh::ShapeMesh,
+    vertex::Vertex,
 };
 
 pub struct TransparentPipeline {
@@ -18,15 +21,13 @@ pub struct TransparentShapeBatch(pub Vec<(Arc<ShapeMesh>, Vec<ShapeInstance>)>);
 impl TransparentPipeline {
     fn create_pipeline(
         device: &wgpu::Device,
-        config: &wgpu::SurfaceConfiguration,        
+        config: &wgpu::SurfaceConfiguration,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> RenderPipeline {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[
-                    camera_bind_group_layout,
-                ],
+                bind_group_layouts: &[camera_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -51,7 +52,18 @@ impl TransparentPipeline {
                 targets: &[Some(wgpu::ColorTargetState {
                     // 4.
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -90,15 +102,9 @@ impl TransparentPipeline {
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
-    ) -> Self {       
-        let pipeline = Self::create_pipeline(
-            device,
-            config,
-            &camera_bind_group_layout,
-        );
-        Self {
-            pipeline,
-        }
+    ) -> Self {
+        let pipeline = Self::create_pipeline(device, config, &camera_bind_group_layout);
+        Self { pipeline }
     }
 
     fn create_render_pass<'a>(
@@ -150,7 +156,6 @@ impl TransparentPipeline {
         encoder.begin_render_pass(&render_pass_descriptor)
     }
 
-
     pub fn render(
         &self,
         // Use Vec because MyMesh is not hashable, use Arc because it has to move to a new container to mismatch with instances
@@ -164,22 +169,25 @@ impl TransparentPipeline {
     ) {
         for (idx, batch) in renderable_batches.iter().enumerate() {
             let clear_color = if idx == 0 { true } else { false };
-            let mut render_pass = self.create_render_pass(encoder, color_view, depth_view, clear_color);
+            let mut render_pass =
+                self.create_render_pass(encoder, color_view, depth_view, clear_color);
             render_pass.set_pipeline(&self.pipeline);
             //needs a texture bind group from the model
             render_pass.set_bind_group(0, camera_bind_group, &[]);
             for (mesh, instances) in batch.0.iter() {
                 render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                render_pass
+                    .set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 let instance_data = instances
                     .iter()
                     .map(|instance| instance.to_raw())
                     .collect::<Vec<_>>();
-                let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Instance Buffer"),
-                    contents: bytemuck::cast_slice(&instance_data),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
+                let instance_buffer =
+                    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("Instance Buffer"),
+                        contents: bytemuck::cast_slice(&instance_data),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    });
                 render_pass.set_vertex_buffer(1, instance_buffer.slice(..));
                 render_pass.draw_indexed(0..mesh.num_indices, 0, 0..instances.len() as u32);
             }
