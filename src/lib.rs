@@ -9,3 +9,4 @@ pub mod shape_mesh;
 pub mod camera_uniform;
 pub mod orthographic_camera;
 pub mod input_context;
+pub mod context;

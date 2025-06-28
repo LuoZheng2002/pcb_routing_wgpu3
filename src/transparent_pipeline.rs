@@ -6,7 +6,7 @@ use std::sync::Arc;
 use wgpu::{RenderPipeline, util::DeviceExt};
 
 use crate::{
-    app::RENDER_CONTEXT, my_texture::MyTexture, shape_instance::{ModelInstanceRaw, ShapeInstance}, shape_mesh::ShapeMesh, vertex::Vertex
+    my_texture::MyTexture, shape_instance::{ModelInstanceRaw, ShapeInstance}, shape_mesh::ShapeMesh, vertex::Vertex
 };
 
 pub struct TransparentPipeline {

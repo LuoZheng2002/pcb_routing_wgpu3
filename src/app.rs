@@ -8,17 +8,18 @@ use winit::{
     window::{Window, WindowAttributes, WindowId},
 };
 
-use crate::{input_context::InputContext, render_context::RenderContext, state::State};
+use crate::{context::Context, input_context::{self, InputContext}, render_context::{self, RenderContext}, state::State};
 
-thread_local! {
-    pub static RENDER_CONTEXT: RefCell<Option<RenderContext>> = RefCell::new(None);
-    pub static STATE: RefCell<State> = RefCell::new(State::default());
-    pub static INPUT_CONTEXT: RefCell<InputContext> = RefCell::new(InputContext::default());
-}
+// thread_local! {
+//     pub static RENDER_CONTEXT: RefCell<Option<RenderContext>> = RefCell::new(None);
+//     pub static STATE: RefCell<State> = RefCell::new(State::default());
+//     pub static INPUT_CONTEXT: RefCell<InputContext> = RefCell::new(InputContext::default());
+// }
 
 #[derive(Default)]
 pub struct App {
     pub window: Option<Arc<Window>>,
+    pub context: Context,
 }
 
 impl ApplicationHandler for App {
@@ -28,12 +29,9 @@ impl ApplicationHandler for App {
             .with_position(LogicalPosition::new(0, 0));
         let window = event_loop.create_window(attributes).unwrap();
         let window = Arc::new(window);
-        RENDER_CONTEXT.with_borrow_mut(|rc| {
-            *rc = Some(RenderContext::new(window.clone()));
-        });
-        STATE.with_borrow_mut(|state| {
-            state.init();
-        });
+        self.context.render_context = Some(RenderContext::new(window.clone()));
+        let mut state = self.context.state.borrow_mut();
+        state.init();
         self.window = Some(window);
     }
     fn device_event(
@@ -42,38 +40,30 @@ impl ApplicationHandler for App {
         _device_id: DeviceId,
         event: DeviceEvent,
     ) {
-        INPUT_CONTEXT.with_borrow_mut(|input_context| {
-            input_context.handle_device_event(&event);
-        });
+        let mut input_context = self.context.input_context.borrow_mut();
+        input_context.handle_device_event(&event);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        INPUT_CONTEXT.with_borrow_mut(|input_context| {
-            input_context.handle_window_event(&event);
-        });
+        let mut input_context = self.context.input_context.borrow_mut();
+        input_context.handle_window_event(&event);
         match event {
             WindowEvent::CloseRequested => {
                 println!("The close button was pressed; stopping");
-                std::process::abort();
+                // std::process::abort();
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
                 self.window.as_ref().unwrap().request_redraw();
-                let size = RENDER_CONTEXT.with_borrow(|rc| {
-                    rc.as_ref().unwrap().size
-                });
-                STATE.with_borrow_mut(|state| {
-                    state.update(&size);
-                });
-                match RENDER_CONTEXT.with_borrow_mut(|rc| {
-                    rc.as_mut().unwrap().render()
-                }){
+                let render_context = self.context.render_context.as_ref().unwrap();
+                let size = *render_context.size.borrow();
+                let mut state = self.context.state.borrow_mut();
+                state.update(render_context);
+                match render_context.render(&state) {
                     Ok(_) => {}
                     // Reconfigure the surface if it's lost or outdated
                     Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                        RENDER_CONTEXT.with_borrow_mut(|rc| {
-                            rc.as_mut().unwrap().resize(size);
-                        });
+                        render_context.resize(size);
                     }
                     // The system is out of memory, we should probably quit
                     Err(wgpu::SurfaceError::OutOfMemory | wgpu::SurfaceError::Other) => {
@@ -88,9 +78,8 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Resized(new_size) => {
-                RENDER_CONTEXT.with_borrow_mut(|rc| {
-                    rc.as_mut().unwrap().resize(new_size);
-                });
+                let render_context = self.context.render_context.as_mut().unwrap();
+                render_context.resize(new_size);
             }
             _ => (),
         }

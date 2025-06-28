@@ -1,4 +1,4 @@
-use std::{collections::HashMap, mem, sync::Arc};
+use std::{cell::{Ref, RefCell}, collections::HashMap, mem, sync::Arc};
 
 use wgpu::{util::DeviceExt, CompositeAlphaMode, PollType};
 use winit::window::Window;
@@ -6,7 +6,7 @@ use winit::window::Window;
 use crate::{
     // model_data::MyMesh,
     // model_instance::ModelInstance,
-    app::STATE, camera_uniform::CameraUniform, my_texture::MyTexture, shape_mesh::ShapeMesh, state::State, transparent_pipeline::{self, TransparentPipeline}, vertex::Vertex
+    camera_uniform::CameraUniform, my_texture::MyTexture, shape_mesh::ShapeMesh, state::State, transparent_pipeline::{self, TransparentPipeline}, vertex::Vertex
     // ui_pipeline::UIPipeline,
 };
 
@@ -14,9 +14,9 @@ pub struct RenderContext {
     pub surface: wgpu::Surface<'static>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
-    pub config: wgpu::SurfaceConfiguration,
-    pub size: winit::dpi::PhysicalSize<u32>,
-    pub depth_texture: MyTexture,
+    pub config: RefCell<wgpu::SurfaceConfiguration>,
+    pub size: RefCell<winit::dpi::PhysicalSize<u32>>,
+    pub depth_texture: RefCell<MyTexture>,
     pub transparent_pipeline: TransparentPipeline,    
     pub camera_buffer: wgpu::Buffer,
     pub camera_bind_group_layout: wgpu::BindGroupLayout,
@@ -122,9 +122,9 @@ impl RenderContext {
             surface,
             device,
             queue,
-            config,
-            size,
-            depth_texture,
+            config: RefCell::new(config),
+            size: RefCell::new(size),
+            depth_texture: RefCell::new(depth_texture),
             transparent_pipeline,
             camera_buffer,
             camera_bind_group_layout,
@@ -133,17 +133,18 @@ impl RenderContext {
             circle_mesh,
         }
     }
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        self.size = new_size;
-        self.config.width = new_size.width;
-        self.config.height = new_size.height;
-        self.surface.configure(&self.device, &self.config);
-        self.depth_texture =
-            MyTexture::create_depth_texture(&self.device, &self.config, "depth texture");
+    pub fn resize(&self, new_size: winit::dpi::PhysicalSize<u32>) {
+        *self.size.borrow_mut() = new_size;
+        let mut config = self.config.borrow_mut();
+        config.width = new_size.width;
+        config.height = new_size.height;
+        self.surface.configure(&self.device, &config);
+        *self.depth_texture.borrow_mut() =
+            MyTexture::create_depth_texture(&self.device, &config, "depth texture");
     }
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        if STATE.with_borrow(|state| state.transparent_shape_submissions.is_none()) {
+    pub fn render(&self, state: &State) -> Result<(), wgpu::SurfaceError> {
+        if state.transparent_shape_submissions.is_none() {
             println!("No transparent shape submissions, skipping render");
             return Ok(());
         }
@@ -152,8 +153,9 @@ impl RenderContext {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         // update camera transform
-        let aspect = self.config.width as f32 / self.config.height as f32;
-        let camera_uniform = STATE.with_borrow(|state|state.camera.to_uniform());
+        // let aspect = self.config.width as f32 / self.config.height as f32;
+        // to do
+        let camera_uniform = state.camera.to_uniform();
         self.queue.write_buffer(
             &self.camera_buffer,
             0,
@@ -166,17 +168,15 @@ impl RenderContext {
                 label: Some("Render Encoder"),
             });
         // convert model instances to mesh instances
-        let transparent_shape_submissions = STATE.with_borrow_mut(|state| {
-            state.transparent_shape_submissions.take()
-        }).unwrap();
-        
+        let transparent_shape_submissions = &state.transparent_shape_submissions.as_ref().unwrap();
+        let depth_texture = self.depth_texture.borrow();
         self.transparent_pipeline.render(
             &transparent_shape_submissions,
             &mut encoder,
             &self.device,
             &self.queue,
             &view,
-            &self.depth_texture.view,
+            &depth_texture.view,
             &self.camera_bind_group,
         );
 

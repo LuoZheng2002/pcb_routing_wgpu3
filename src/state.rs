@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::{Arc, Mutex}, time::Instant};
 use cgmath::{Euler, Quaternion};
 use wgpu::util::DeviceExt;
 
-use crate::{app::RENDER_CONTEXT, input_context::InputContext, orthographic_camera::OrthographicCamera, shape_instance::ShapeInstance, shape_mesh::ShapeMesh, transparent_pipeline::TransparentShapeBatch, vertex::Vertex};
+use crate::{input_context::InputContext, orthographic_camera::OrthographicCamera, render_context::RenderContext, shape_instance::ShapeInstance, shape_mesh::ShapeMesh, transparent_pipeline::TransparentShapeBatch, vertex::Vertex};
 
 // model path,
 pub struct State {
@@ -33,7 +33,7 @@ impl State {
         
     }
 
-    pub fn update(&mut self, window_size: &winit::dpi::PhysicalSize<u32>) {
+    pub fn update(&mut self, render_context: &RenderContext) {
         // calculate fps every 1 second
         let fps_timer = self.fps_timer.get_or_insert_with(|| Instant::now());
         let cursor_timer = self.cursor_timer.get_or_insert_with(|| Instant::now());
@@ -63,9 +63,7 @@ impl State {
         let speed = 0.1;
         let delta_angle = current_time * speed;
 
-        let mesh1 = RENDER_CONTEXT.with_borrow(|rc| {
-            rc.as_ref().unwrap().circle_mesh.clone()
-        });
+        let mesh1 = render_context.circle_mesh.clone();
 
         let instance1 = ShapeInstance {
             position: [0.0, 0.0, 0.0].into(),
@@ -116,8 +114,6 @@ impl State {
         // self.submit_ui_renderable(ui_meta1, ui_instance1);
 
         // to do
-        let screen_width = window_size.width;
-        let screen_height = window_size.height;
         // panic!()
 
     }
