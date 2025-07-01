@@ -1,6 +1,7 @@
-use crate::{prim_shape::PrimShape, vec2::{FixedVec2, FloatVec2}};
-
-
+use crate::{
+    prim_shape::PrimShape,
+    vec2::{FixedVec2, FloatVec2},
+};
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub enum Direction {
@@ -13,7 +14,7 @@ pub enum Direction {
     DownRight,
     DownLeft,
 }
-impl Direction{
+impl Direction {
     pub fn to_degree_angle(&self) -> f32 {
         match self {
             Direction::Up => 90.0,
@@ -28,18 +29,17 @@ impl Direction{
     }
 }
 
-
-
 #[derive(Debug, Clone)]
-pub struct TraceSegment{
-    pub start: FixedVec2, // Start point of the trace segment
-    pub end: FixedVec2, // End point of the trace segment
+pub struct TraceSegment {
+    pub start: FixedVec2,     // Start point of the trace segment
+    pub end: FixedVec2,       // End point of the trace segment
     pub direction: Direction, // Direction of the trace segment
-    pub width: f32, // Width of the trace segment
+    pub width: f32,           // Width of the trace segment
+    pub clearance: f32, // Clearance around the trace segment
 }
 
-impl TraceSegment{
-    pub fn to_primitive_shapes(&self) -> Vec<PrimShape> {
+impl TraceSegment {
+    pub fn to_shapes(&self) -> Vec<PrimShape> {
         // a trace segment is composed of two circles and a rectangle
         let start = self.start.to_float();
         let end = self.end.to_float();
@@ -63,12 +63,47 @@ impl TraceSegment{
         };
         vec![start_circle, end_circle, segment_rect]
     }
-    pub fn collides_with(&self, other: &TraceSegment) ->bool{
-        let primitive_shapes_self = self.to_primitive_shapes();
-        let primitive_shapes_other = other.to_primitive_shapes();
-        for shape_self in primitive_shapes_self {
-            for shape_other in &primitive_shapes_other {
-                if shape_self.collides_with(shape_other) {
+    pub fn to_clearance_shapes(&self) -> Vec<PrimShape> {
+        // Clearance is represented by a larger rectangle around the segment
+        let start = self.start.to_float();
+        let end = self.end.to_float();
+        let segment_length = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
+        let new_width = self.width + self.clearance * 2.0;
+        let new_diameter = new_width;
+        let clearance_start_circle = PrimShape::Circle {
+            position: start,
+            diameter: new_diameter,
+        };
+        let clearance_end_circle = PrimShape::Circle {
+            position: end,
+            diameter: new_diameter,
+        };
+        let clearance_rect = PrimShape::Rectangle {
+            position: FloatVec2 {
+                x: (start.x + end.x) / 2.0,
+                y: (start.y + end.y) / 2.0,
+            },
+            width: segment_length,
+            height: new_width,
+            rotation: cgmath::Deg(self.direction.to_degree_angle()),
+        };
+        vec![clearance_start_circle, clearance_end_circle, clearance_rect]
+    }
+    pub fn collides_with(&self, other: &TraceSegment) -> bool {
+        let self_shapes = self.to_shapes();
+        let self_clearance_shapes = self.to_clearance_shapes();
+        let other_shapes = other.to_shapes();
+        let other_clearance_shapes = other.to_clearance_shapes();
+        for self_shape in self_shapes {
+            for other_clearance_shape in &other_clearance_shapes {
+                if self_shape.collides_with(other_clearance_shape) {
+                    return true;
+                }
+            }
+        }
+        for self_clearance_shape in self_clearance_shapes {
+            for other_shape in &other_shapes {
+                if self_clearance_shape.collides_with(other_shape) {
                     return true;
                 }
             }
@@ -77,19 +112,18 @@ impl TraceSegment{
     }
 }
 
-
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TraceAnchors(pub Vec<FixedVec2>); // List of turning points in the trace path, excluding start and end
 
 #[derive(Debug, Clone)]
-pub struct TracePath{
+pub struct TracePath {
     pub anchors: TraceAnchors, // List of turning points in the trace path, excluding start and end
     pub segments: Vec<TraceSegment>, // List of segments in the trace path
+    pub length: f64,
 }
 // shrink?
 
-impl TracePath{
+impl TracePath {
     pub fn collides_with(&self, other: &TracePath) -> bool {
         for segment_self in &self.segments {
             for segment_other in &other.segments {

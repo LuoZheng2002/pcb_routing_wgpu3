@@ -1,84 +1,118 @@
+use core::{num, panic};
+use std::{
+    cell::RefCell,
+    collections::{BTreeSet, BinaryHeap, HashMap, HashSet},
+    num::NonZeroUsize,
+    rc::Rc,
+    sync::{Arc, Mutex},
+    vec,
+};
 
+use futures::sink;
+use ordered_float::NotNan;
+use rand::distr::{weighted::WeightedIndex, Distribution};
 
-use core::num;
-use std::{cell::RefCell, collections::{BTreeSet, HashMap, HashSet}, num::NonZeroUsize, vec};
-
-use crate::{pad::Pad, trace_path::{TraceAnchors, TracePath}, vec2::{FixedPoint, FixedVec2}};
+use crate::{
+    astar::AStarModel, hyperparameters::{ITERATION_TO_NUM_TRACES, ITERATION_TO_PRIOR_PROBABILITY, MAX_GENERATION_ATTEMPTS, NEXT_ITERATION_TO_REMAINING_PROBABILITY}, pad::Pad, pcb_render_model::{PcbRenderModel, UpdatePcbRenderModel}, prim_shape::PrimShape, trace_path::{TraceAnchors, TracePath}, vec2::{FixedPoint, FixedVec2}
+};
 
 // use shared::interface_types::{Color, ColorGrid};
 
 // use crate::{grid::Point, hyperparameters::{HALF_PROBABILITY_RAW_SCORE, ITERATION_TO_PRIOR_PROBABILITY, LENGTH_PENALTY_RATE, TURN_PENALTY_RATE}};
 
-
-
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Color{
+pub struct Color {
     pub r: u8,
     pub g: u8,
     pub b: u8,
 }
 
 #[derive(Debug, Clone)]
-pub struct Connection{
+pub struct Connection {
+    pub net_id: NetID,               // The net that the connection belongs to
+    pub connection_id: ConnectionID, // Unique identifier for the connection
     pub source: Pad,
     pub sink: Pad,
-    pub traces: HashMap<TraceID, TraceInfo>, // List of traces connecting the source and sink pads
+    // pub traces: HashMap<TraceID, TraceInfo>, // List of traces connecting the source and sink pads
 }
 
 #[derive(Debug, Clone)]
-pub struct NetInfo{
-    pub net_id: usize,
-    pub color: Color, // Color of the net
-    pub connections: Vec<Connection>, // List of connections in the net, the source pad is the same
+pub struct NetInfo {
+    pub net_id: NetID,
+    pub color: Color,                                   // Color of the net
+    pub connections: HashMap<ConnectionID, Rc<Connection>>, // List of connections in the net, the source pad is the same
 }
 
 #[derive(Copy, Debug, Clone, PartialEq, Hash, Eq, PartialOrd, Ord)]
 pub struct NetID(pub usize);
 #[derive(Copy, Debug, Clone, PartialEq, Hash, Eq, PartialOrd, Ord)]
-pub struct PadPairID(pub usize);
+pub struct ConnectionID(pub usize);
 #[derive(Copy, Debug, Clone, PartialEq, Hash, Eq, PartialOrd, Ord)]
-pub struct TraceID(pub usize);
+pub struct ProbaTraceID(pub usize);
 
+// #[derive(Debug, Clone)]
+// pub struct PadPair{
+//     pub net_id: NetID,
+//     pub pad_pair_id: PadPairID,
+//     pub start: FixedPoint, // Start point of the trace
+//     pub end: FixedPoint, // End point of the trace
+// }
 
+// pub struct PostProcessInput{
+//     pub width: usize,
+//     pub height: usize,
+//     pub nets: HashMap<NetID, NetInfo>,
+//     pub net_to_pads: HashMap<NetID, HashSet<FixedVec2>>, // NetID to list of pad coordinates
+//     // output
+//     pub net_to_pad_pairs: HashMap<NetID, HashSet<PadPairID>>, // NetID to PadPairToRouteID to PadPairToRoute
+//     pub pad_pairs: HashMap<PadPairID, PadPair>, // PadPairToRouteID to PadPairToRoute
+//     pub pad_pair_to_traces: HashMap<PadPairID, HashSet<TraceID>>, // PadPairID to TraceID
+//     pub traces: HashMap<TraceID, TraceInfo>, // TraceID to Trace
+// }
 
-#[derive(Debug, Clone)]
-pub struct PadPair{
-    pub net_id: NetID,
-    pub pad_pair_id: PadPairID,
-    pub start: FixedPoint, // Start point of the trace
-    pub end: FixedPoint, // End point of the trace
-}
-
-
-
-
-
-
-
-
-pub struct PostProcessInput{
-    pub width: usize,
-    pub height: usize,
-    pub nets: HashMap<NetID, NetInfo>,
-    pub net_to_pads: HashMap<NetID, HashSet<FixedVec2>>, // NetID to list of pad coordinates
-    // output
-    pub net_to_pad_pairs: HashMap<NetID, HashSet<PadPairID>>, // NetID to PadPairToRouteID to PadPairToRoute
-    pub pad_pairs: HashMap<PadPairID, PadPair>, // PadPairToRouteID to PadPairToRoute
-    pub pad_pair_to_traces: HashMap<PadPairID, HashSet<TraceID>>, // PadPairID to TraceID
-    pub traces: HashMap<TraceID, TraceInfo>, // TraceID to Trace
-}
-
-#[derive(Debug, Clone)]
-pub struct TraceInfo{
-    pub trace_path: TracePath, // The path of the trace
-    pub trace_length: f64, // The length of the trace
+#[derive(Debug)]
+pub struct ProbaTrace {
+    pub net_id: NetID,                        // The net that the trace belongs to
+    pub connection_id: ConnectionID,          // The connection that the trace belongs to
+    pub proba_trace_id: ProbaTraceID,         // Unique identifier for the trace
+    pub trace_path: TracePath,                // The path of the trace
     pub iteration: NonZeroUsize, // The iteration that the trace belongs to, starting from 1
-    pub posterior_normalized: RefCell<Option<f64>>, // to be accessed in the next iteration
+    pub posterior: RefCell<Option<f64>>, // to be accessed in the next iteration
     pub temp_posterior: RefCell<Option<f64>>, // serve as a buffer for simultaneous updates
-    pub collision_adjacency: HashSet<TraceID>, // The set of traces that collide with this trace
 }
 
+impl ProbaTrace{
+    fn get_normalized_prior(
+        &self,
+    ) -> f64 {
+        *ITERATION_TO_PRIOR_PROBABILITY.get(&self.iteration)
+            .expect(format!("No prior probability for iteration {:?}", self.iteration).as_str())
+    }
 
+    pub fn get_posterior_with_fallback(
+        &self,
+    ) -> f64 {
+        let posterior = self.posterior.borrow();
+        if let Some(posterior) = posterior.as_ref() {
+            *posterior
+        } else {
+            self.get_normalized_prior()
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FixedTrace {
+    pub net_id: NetID,               // The net that the trace belongs to
+    pub connection_id: ConnectionID, // The connection that the trace belongs to
+    pub trace_path: TracePath,
+}
+
+#[derive(Debug, Clone)]
+pub enum Traces {
+    Fixed(FixedTrace), // A trace that is fixed and does not change
+    Probabilistic(HashMap<ProbaTraceID, Rc<ProbaTrace>>), // A trace that is probabilistic and can change
+}
 
 // impl TraceInfo{
 //     fn calculate_score(&self)->f64{
@@ -122,7 +156,7 @@ pub struct TraceInfo{
 //         // we do not use cache until there is performance issue
 //         self.calculate_normalized_prior_probability(num_traces_in_the_same_iteration)
 //     }
-    
+
 //     // pub fn calculate_fallback_posterior_unnormalized(&self, num_traces_in_the_same_iteration: usize)->f64{
 //     //     // calculate the posterior probability of the trace
 //     //     // this is used when there is no old posterior probability available
@@ -140,55 +174,515 @@ pub struct TraceInfo{
 //         let posterior_normalized = self.posterior_normalized.borrow();
 //         if let Some(old_posterior) = posterior_normalized.as_ref() {
 //             *old_posterior
-//         } else {            
+//         } else {
 //             self.get_normalized_prior_probability(num_traces_in_the_same_iteration)
 //         }
 //     }
 //     // call stack: want to sample traces that block the way -> call get_posterior_normalized for other traces
 //     // -> use num_traces_in_the_same_iteration to get the normalized prior probability
-//     // -> use the normalized prior probability as the normalized posterior probability 
+//     // -> use the normalized prior probability as the normalized posterior probability
 
 //     // want to sample traces -> should already have the posterior_normalized
 // }
 
-
 #[derive(Clone)]
-pub struct ProbaGridProblem{
+pub struct ProbaGridProblem {
     pub width: usize,
     pub height: usize,
     pub nets: HashMap<NetID, NetInfo>,
     pub net_to_pads: HashMap<NetID, HashSet<FixedVec2>>, // NetID to list of pad coordinates
 }
 
-
 #[derive(Copy, Debug, Clone, PartialEq, Hash, Eq, PartialOrd, Ord)]
 pub struct IterationNum(pub NonZeroUsize);
 
+// backtrack search:
+// each node contains trace candidates, their rankings, and already determined traces
+// coarse mode: sample multiple traces at a time
+// fine mode: change the model immediately when one trace is determined
+
+// separate the problem, the probabilistic model, and the solution
 
 // (0, 0) center, up, right
-pub struct PcbProblem{
+pub struct PcbProblem {
     pub width: f32,
     pub height: f32,
-    pub nets: HashMap<NetID, NetInfo>,
-    pub visited_traces: BTreeSet<TraceAnchors>,    
-    pub next_iteration: NonZeroUsize, // The next iteration to be processed, starting from 1
-    pub trace_id_generator: Box<dyn Iterator<Item=TraceID> + Send + 'static>, // A generator for TraceID, starting from 0
+    pub nets: HashMap<NetID, NetInfo>, // NetID to NetInfo
+    pub net_id_generator: Box<dyn Iterator<Item = NetID> + Send + 'static>, // A generator for NetID, starting from 0
+    pub connection_id_generator: Box<dyn Iterator<Item = ConnectionID> + Send + 'static>, // A generator for ConnectionID, starting from 0
 }
 
+// a connection can have either a determined trace or multiple probabilistic traces
+pub struct ProbaModel {
+    pub trace_id_generator: Box<dyn Iterator<Item = ProbaTraceID> + Send + 'static>, // A generator for TraceID, starting from 0
+    pub connection_to_traces: HashMap<ConnectionID, Traces>, // ConnectionID to list of traces
+    // pub visited_traces: BTreeSet<TraceAnchors>,
+    pub collision_adjacency: HashMap<ProbaTraceID, HashSet<ProbaTraceID>>, // TraceID to set of colliding TraceIDs
+    pub next_iteration: NonZeroUsize, // The next iteration to be processed, starting from 1
+}
 
-impl PcbProblem{
-    pub fn collides_with_border(&self)->bool{
+impl ProbaModel {
+    pub fn create_and_solve(
+        problem: &PcbProblem,
+        fixed_traces: &HashMap<ConnectionID, FixedTrace>,
+        pcb_render_model: Arc<Mutex<PcbRenderModel>>,
+    ) -> Result<Self, String> {
+        let mut connection_ids: Vec<ConnectionID> = Vec::new();
+        for net_info in problem.nets.values() {
+            for connection in net_info.connections.keys() {
+                connection_ids.push(*connection);
+            }
+        }
+        let mut connection_to_traces: HashMap<ConnectionID, Traces> = HashMap::new();
+        for connection_id in connection_ids {
+            let traces = if let Some(fixed_trace) = fixed_traces.get(&connection_id) {
+                Traces::Fixed(fixed_trace.clone())
+            } else {
+                Traces::Probabilistic(HashMap::new())
+            };
+            connection_to_traces.insert(connection_id, traces);
+        }
+        let mut proba_model = ProbaModel {
+            trace_id_generator: Box::new((0..).map(ProbaTraceID)),
+            connection_to_traces,
+            collision_adjacency: HashMap::new(),
+            next_iteration: NonZeroUsize::new(1).expect("Next iteration must be non-zero"),
+        };
+        // submit renderable and block the thread
+        let render_model = proba_model.to_pcb_render_model(problem);
+        pcb_render_model.update_pcb_render_model(render_model);
+        let mut input = String::new();
+        let _ = std::io::stdin().read_line(&mut input).unwrap();
+
         todo!()
     }
 
-    // pub fn get_num_traces_in_the_same_iteration(&self, trace_id: TraceID)->usize{
-    //     let trace_info = self.traces.get(&trace_id).unwrap();
-    //     let pad_pair_id = trace_info.pad_pair_id;
-    //     let iteration_num = trace_info.iteration;
-    //     let num = self.pad_pair_to_traces.get(&pad_pair_id).unwrap()
-    //         .get(&IterationNum(iteration_num)).unwrap()
-    //         .len();
-    //     assert!(num > 0, "There should be at least one trace in the same iteration");
-    //     num
-    // }
+    fn sample_new_traces(&mut self, problem: &PcbProblem) -> Result<(), String> {
+        let mut new_proba_traces: Vec<Rc<ProbaTrace>> = Vec::new();
+
+        // connection_id to connection
+        let mut connections: HashMap<ConnectionID, Rc<Connection>> = HashMap::new();
+        // connection_id to net_id
+        let mut connection_to_net: HashMap<ConnectionID, NetID> = HashMap::new();
+        for (net_id, net_info) in problem.nets.iter() {
+            for (connection_id, connection) in net_info.connections.iter() {
+                connections.insert(*connection_id, connection.clone());
+                connection_to_net.insert(*connection_id, *net_id);
+            }
+        }
+        
+
+        // proba_trace_id to proba_trace
+        let mut proba_traces: HashMap<ProbaTraceID, Rc<ProbaTrace>> = HashMap::new();
+        // visited TraceAnchors
+        let mut visited_traces: BTreeSet<TraceAnchors> = BTreeSet::new();
+        for traces in self.connection_to_traces.values() {
+            if let Traces::Probabilistic(trace_map) = traces {
+                for (proba_trace_id, proba_trace) in trace_map.iter() {
+                    proba_traces.insert(*proba_trace_id, proba_trace.clone());
+                    visited_traces.insert(proba_trace.trace_path.anchors.clone());
+                }
+            }
+        }
+
+        // net_id to proba_trace_ids
+        let mut net_to_proba_traces: HashMap<NetID, Vec<ProbaTraceID>> = problem
+            .nets
+            .keys()
+            .map(|net_id| (*net_id, Vec::new()))
+            .collect();
+        for (connection_id, traces) in self.connection_to_traces.iter() {
+            if let Traces::Probabilistic(trace_ids) = traces {
+                let net_id = connection_to_net.get(connection_id).expect(
+                    format!(
+                        "ConnectionID {:?} not found in connection_id_to_net_id",
+                        connection_id
+                    )
+                    .as_str(),
+                );
+                net_to_proba_traces
+                    .get_mut(net_id)
+                    .expect(format!("NetID {:?} not found in net_to_proba_traces", net_id).as_str())
+                    .extend(trace_ids.keys().cloned());
+            }
+        }
+        // temporary normalized posterior for each proba_trace
+        let mut temp_normalized_posteriors: HashMap<ProbaTraceID, f64> = HashMap::new();
+        for (_, traces) in self.connection_to_traces.iter() {
+            if let Traces::Probabilistic(trace_ids) = traces {
+                let mut sum_posterior: f64 = 0.0;
+                for (_, proba_trace) in trace_ids.iter() {
+                    let posterior = proba_trace.get_posterior_with_fallback();
+                    sum_posterior += posterior;
+                }
+                sum_posterior += NEXT_ITERATION_TO_REMAINING_PROBABILITY.get(&self.next_iteration)
+                    .expect(format!("No remaining probability for iteration {:?}", self.next_iteration).as_str());
+                // normalize the posterior for each trace
+                // divide each posterior by the sum of all posteriors
+                for (proba_trace_id, proba_trace) in trace_ids.iter() {
+                    let posterior = proba_trace.get_posterior_with_fallback();
+                    let normalized_posterior = posterior / sum_posterior;
+                    temp_normalized_posteriors.insert(*proba_trace_id, normalized_posterior);
+                }
+            }   
+        }
+
+        // the outer loop for generating the dijkstra model
+        for net_id in problem.nets.keys() {
+            // collect connections that are not in this net
+            let obstacle_connections: HashSet<ConnectionID> = problem.nets
+                .iter()
+                .filter(|(other_net_id, _)| **other_net_id != *net_id)
+                .flat_map(|(_, net_info)| net_info.connections.keys())
+                .cloned()
+                .collect();
+            // initialize the number of generated traces for each connection
+            let mut num_generated_traces: HashMap<ConnectionID, usize> = self
+                .connection_to_traces
+                .keys()
+                .map(|connection_id| (*connection_id, 0))
+                .collect();
+            // initialize the number of generation attempts
+            let mut num_generation_attempts: usize = 0;
+            // the inner loop for generating traces for each connection in the net
+            let max_num_traces = *ITERATION_TO_NUM_TRACES.get(&self.next_iteration).expect(
+                format!(
+                    "No number of traces for iteration {:?}",
+                    self.next_iteration
+                )
+                .as_str(),
+            );
+            while num_generation_attempts < MAX_GENERATION_ATTEMPTS
+                && num_generated_traces
+                    .values()
+                    .any(|&count| count < max_num_traces)
+            {
+                println!("Generation attempt: {}", num_generation_attempts + 1);
+                num_generation_attempts += 1;
+                let mut sampled_obstacle_traces: HashMap<ConnectionID, Option<ProbaTraceID>> = HashMap::new();
+                // randomly generate a trace for each pad pair of other nets (in a rare case the trace will not be generated)
+                for obstacle_connection_id in obstacle_connections.iter() {
+                    // sample a trace from this connection
+                    let traces = self.connection_to_traces.get(obstacle_connection_id).expect(
+                        format!(
+                            "ConnectionID {:?} not found in connection_to_traces",
+                            obstacle_connection_id
+                        )
+                        .as_str(),
+                    );
+                    let trace_ids = if let Traces::Probabilistic(trace_ids) = traces {
+                        trace_ids.keys().cloned().collect::<Vec<ProbaTraceID>>()
+                    } else {
+                        continue; // Skip fixed traces
+                    };
+                    let mut sum_normalized_posterior: f64 = 0.0;
+                    let mut normalized_posteriors: Vec<f64> = Vec::new();
+                    for trace_id in trace_ids.iter() {
+                        let normalized_posterior = *temp_normalized_posteriors
+                            .get(trace_id)
+                            .expect(format!("No normalized posterior for trace ID {:?}", trace_id).as_str());
+                        sum_normalized_posterior += normalized_posterior;
+                        normalized_posteriors.push(normalized_posterior);
+                    }
+                    assert!(sum_normalized_posterior < 1.0, "Sum of normalized posteriors must be less than 1.0, got: {}", sum_normalized_posterior);
+                    let num_trace_candidates = normalized_posteriors.len();
+                    let remaining_probability = 1.0 - sum_normalized_posterior;
+                    normalized_posteriors.push(remaining_probability);
+                    let dist = WeightedIndex::new(normalized_posteriors).unwrap();
+                    let mut rng = rand::rng();
+                    let index = dist.sample(&mut rng);
+                    let chosen_proba_trace_id: Option<ProbaTraceID> = if index < num_trace_candidates {
+                        Some(trace_ids[index])
+                    } else {
+                        None
+                    };
+                    sampled_obstacle_traces.insert(
+                        *obstacle_connection_id,
+                        chosen_proba_trace_id,
+                    );
+                }
+                let mut obstacle_shapes: Vec<PrimShape> = Vec::new();
+                let mut obstacle_clearance_shapes: Vec<PrimShape> = Vec::new();
+                // add all sampled traces to the obstacle shapes
+                for (_, proba_trace_id) in sampled_obstacle_traces.iter() {
+                    let proba_trace_id = if let Some(proba_trace_id) = proba_trace_id {
+                        *proba_trace_id
+                    } else {
+                        continue; // Skip if no trace was sampled
+                    };
+                    let proba_trace = proba_traces.get(&proba_trace_id).expect(
+                        format!("ProbaTraceID {:?} not found in proba_traces", proba_trace_id).as_str(),
+                    );
+                    let trace_segments = &proba_trace.trace_path.segments;
+                    for segment in trace_segments.iter() {
+                        let shapes = segment.to_shapes();
+                        obstacle_shapes.extend(shapes);
+                        // add clearance shapes
+                        let clearance_shapes = segment.to_clearance_shapes();
+                        obstacle_clearance_shapes.extend(clearance_shapes);
+                    }
+                }
+                // add all pads in other nets to the obstacle shapes
+                for obstacle_connection_id in obstacle_connections.iter() {
+                    let connection = connections.get(obstacle_connection_id).expect(
+                        format!(
+                            "ConnectionID {:?} not found in connections",
+                            obstacle_connection_id
+                        )
+                        .as_str(),
+                    );
+                    let source_pad_shapes = connection.source.to_shapes();
+                    let sink_pad_shapes = connection.sink.to_shapes();
+                    obstacle_shapes.extend(source_pad_shapes);
+                    obstacle_shapes.extend(sink_pad_shapes);
+                }
+                let mut astar_model = AStarModel{
+                    width: problem.width,
+                    height: problem.height,
+                    obstacle_shapes,
+                    obstacle_clearance_shapes,
+                    start: FixedVec2{x: Default::default(), y: Default::default()},
+                    end: FixedVec2{x: Default::default(), y: Default::default()},
+                };
+                let connections = &problem.nets
+                    .get(net_id)
+                    .expect(format!("NetID {:?} not found in nets", net_id).as_str())
+                    .connections;
+                // only consider connections with probabilistic traces
+                let connections: Vec<(ConnectionID, Rc<Connection>)> = connections
+                    .iter()
+                    .filter(|(connection_id, _)| {
+                        let traces = self.connection_to_traces.get(connection_id).expect(
+                            format!("ConnectionID {:?} not found in connection_to_traces", connection_id).as_str(),
+                        );
+                        if let Traces::Probabilistic(_) = traces {
+                            true // Only consider connections with probabilistic traces
+                        } else {
+                            false // Skip fixed traces
+                        }
+                    })
+                    .map(|(connection_id, connection)|{
+                        (*connection_id, connection.clone())
+                    })
+                    .collect();
+
+                for (connection_id, connection) in connections.iter() {
+                    let connection_num_generated_traces = num_generated_traces
+                        .get(connection_id)
+                        .expect(format!("ConnectionID {:?} not found in num_generated_traces", connection_id).as_str());
+                    if *connection_num_generated_traces >= max_num_traces {
+                        println!("ConnectionID {:?} already has enough traces, skipping", connection_id);
+                        continue; // Skip this connection if it already has enough traces
+                    }
+                    // sample a trace for this connection
+                    astar_model.start = connection.source.position.to_fixed();
+                    astar_model.end = connection.sink.position.to_fixed();
+                    // run A* algorithm to find a path
+                    let astar_result = astar_model.run();
+                    let astar_result = match astar_result {
+                        Ok(result) => result,
+                        Err(err) => {
+                            println!("A* algorithm failed: {}", err);
+                            continue; // Skip this connection if A* fails
+                        }
+                    };
+                    let trace_path = astar_result.trace_path;
+                    if visited_traces.contains(&trace_path.anchors) {
+                        println!("Trace path {:?} already visited, skipping", trace_path.anchors);
+                        continue;
+                    }
+                    visited_traces.insert(trace_path.anchors.clone());
+                    let proba_trace_id = self
+                        .trace_id_generator
+                        .next()
+                        .expect("TraceID generator exhausted");
+                    let proba_trace = ProbaTrace {
+                        net_id: *net_id,
+                        connection_id: *connection_id,
+                        proba_trace_id,
+                        trace_path,
+                        iteration: self.next_iteration,
+                        posterior: RefCell::new(None), // Initialize with None, will be updated later
+                        temp_posterior: RefCell::new(None), // Temporary posterior for simultaneous updates
+                    };
+                    new_proba_traces.push(Rc::new(proba_trace));
+                    let num = num_generated_traces
+                        .get_mut(connection_id)
+                        .expect(format!("ConnectionID {:?} not found in num_generated_traces", connection_id).as_str());
+                    *num += 1;
+                }
+            }
+        }
+        // add the new traces to the model
+        for proba_trace in new_proba_traces {
+            let proba_trace_id = proba_trace.proba_trace_id;
+            let connection_id = proba_trace.connection_id;
+            let traces = self.connection_to_traces.get_mut(&connection_id).expect(
+                format!("ConnectionID {:?} not found in connection_to_traces", connection_id).as_str(),
+            );
+            // traces can only be probabilistic, if it is fixed, we panic
+            let traces = if let Traces::Probabilistic(trace_map) = traces {
+                trace_map
+            } else {
+                panic!(
+                    "ConnectionID {:?} has fixed traces, cannot add probabilistic trace",
+                    connection_id
+                );
+            };
+            let old = traces.insert(proba_trace_id, proba_trace.clone());
+            assert!(
+                old.is_none(),
+                "ProbaTraceID {:?} already exists for ConnectionID {:?}",
+                proba_trace_id,
+                connection_id
+            );            
+        }
+
+        // update proba_traces to include the new traces
+        let mut proba_traces: HashMap<ProbaTraceID, Rc<ProbaTrace>> = HashMap::new();
+        for traces in self.connection_to_traces.values() {
+            if let Traces::Probabilistic(trace_map) = traces {
+                for (proba_trace_id, proba_trace) in trace_map.iter() {
+                    proba_traces.insert(*proba_trace_id, proba_trace.clone());
+                }
+            }
+        }
+        // update the collision adjacency
+        let mut collision_adjacency: HashMap<ProbaTraceID, HashSet<ProbaTraceID>> = proba_traces.iter()
+            .map(|(proba_trace_id, _)| (*proba_trace_id, HashSet::new()))
+            .collect();
+        // update net_to_proba_traces to include the new traces
+        let mut net_to_proba_traces: HashMap<NetID, Vec<ProbaTraceID>> = problem
+            .nets
+            .keys()
+            .map(|net_id| (*net_id, Vec::new()))
+            .collect();
+        for (connection_id, traces) in self.connection_to_traces.iter() {
+            if let Traces::Probabilistic(trace_ids) = traces {
+                let net_id = connection_to_net.get(connection_id).expect(
+                    format!(
+                        "ConnectionID {:?} not found in connection_id_to_net_id",
+                        connection_id
+                    )
+                    .as_str(),
+                );
+                net_to_proba_traces
+                    .get_mut(net_id)
+                    .expect(format!("NetID {:?} not found in net_to_proba_traces", net_id).as_str())
+                    .extend(trace_ids.keys().cloned());
+            }
+        }
+        // calculate the collisions between traces
+        let proba_traces_vec: Vec<Vec<ProbaTraceID>> = net_to_proba_traces.into_values().collect();
+        for i in 0..proba_traces_vec.len() {
+            for j in (i + 1)..proba_traces_vec.len() {
+                let net_i = &proba_traces_vec[i];
+                let net_j = &proba_traces_vec[j];
+                for trace_i in net_i.iter() {
+                    for trace_j in net_j.iter() {
+                        // check if the traces collide
+                        let proba_trace_i = proba_traces.get(trace_i).expect(
+                            format!("ProbaTraceID {:?} not found in proba_traces", trace_i).as_str(),
+                        );
+                        let proba_trace_j = proba_traces.get(trace_j).expect(
+                            format!("ProbaTraceID {:?} not found in proba_traces", trace_j).as_str(),
+                        );
+                        if proba_trace_i.trace_path.collides_with(&proba_trace_j.trace_path) {
+                            // add the collision to the adjacency
+                            collision_adjacency
+                                .get_mut(trace_i)
+                                .expect(format!("ProbaTraceID {:?} not found in collision_adjacency", trace_i).as_str())
+                                .insert(*trace_j);
+                            collision_adjacency
+                                .get_mut(trace_j)
+                                .expect(format!("ProbaTraceID {:?} not found in collision_adjacency", trace_j).as_str())
+                                .insert(*trace_i);
+                        }
+                    }
+                }
+            }
+        }
+        self.collision_adjacency = collision_adjacency;
+        // update next_iteration
+        self.next_iteration = NonZeroUsize::new(self.next_iteration.get() + 1).unwrap();
+        Ok(())
+    }
+    pub fn to_pcb_render_model(&self, problem: &PcbProblem) -> PcbRenderModel {
+        let mut pcb_render_model = PcbRenderModel {
+            width: problem.width,
+            height: problem.height,
+            pad_renderables: Vec::new(), // Will be filled with pads from the problem
+            trace_segment_renderables: Vec::new(), // Will be filled with traces from the model
+        };
+        todo!("Convert ProbaModel to PcbRenderModel");
+    }
+}
+
+pub struct Node {
+    pub remaining_trace_candidates: BinaryHeap<(NotNan<f64>, ProbaTraceID)>, // The remaining trace candidates to be processed, sorted by their scores)>
+    pub fixed_traces: HashMap<ConnectionID, FixedTrace>,
+    pub prob_up_to_date: bool, // Whether the probabilistic model is up to date
+}
+
+pub struct PcbSolution {
+    pub determined_traces: HashMap<ConnectionID, FixedTrace>, // NetID to ConnectionID to FixedTrace
+}
+
+impl PcbProblem {
+    pub fn new(width: f32, height: f32) -> Self {
+        let net_id_generator = Box::new((0..).map(NetID));
+        let connection_id_generator = Box::new((0..).map(ConnectionID));
+        PcbProblem {
+            width,
+            height,
+            nets: HashMap::new(),
+            net_id_generator,
+            connection_id_generator,
+        }
+    }
+    pub fn add_net(&mut self, color: Color) -> NetID {
+        let duplicate_color = self.nets.values().any(|net_info| net_info.color == color);
+        assert!(
+            !duplicate_color,
+            "Net with color {:?} already exists",
+            color
+        );
+        let net_id = self
+            .net_id_generator
+            .next()
+            .expect("NetID generator exhausted");
+        let net_info = NetInfo {
+            net_id,
+            color,
+            connections: HashMap::new(),
+        };
+        self.nets.insert(net_id, net_info);
+        net_id
+    }
+    /// assert the sources in the same net are the same
+    pub fn add_connection(&mut self, net_id: NetID, source: Pad, sink: Pad) -> ConnectionID {
+        let net_info = self.nets.get_mut(&net_id).expect("NetID not found");
+        let connection_id = self
+            .connection_id_generator
+            .next()
+            .expect("ConnectionID generator exhausted");
+        let connection = Connection {
+            net_id,
+            connection_id,
+            source,
+            sink,
+        };
+        net_info.connections.insert(connection_id, Rc::new(connection));
+        connection_id
+    }
+
+    pub fn solve(&self) -> PcbSolution {
+        let node_stack: Vec<Node> = Vec::new();
+        //  let first_node =
+        todo!()
+    }
+
+    pub fn collides_with_border(&self) -> bool {
+        todo!()
+    }
 }

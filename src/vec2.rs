@@ -1,5 +1,5 @@
 use fixed::traits::Fixed;
-
+use ordered_float::Float;
 
 pub type FixedPoint = fixed::types::I24F8;
 
@@ -9,7 +9,7 @@ pub struct FixedVec2 {
     pub y: FixedPoint,
 }
 
-impl FixedVec2{
+impl FixedVec2 {
     pub fn to_float(&self) -> FloatVec2 {
         FloatVec2 {
             x: self.x.to_num(),
@@ -19,7 +19,16 @@ impl FixedVec2{
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct FloatVec2{
+pub struct FloatVec2 {
     pub x: f32,
     pub y: f32,
+}
+
+impl FloatVec2 {
+    pub fn to_fixed(&self) -> FixedVec2 {
+        FixedVec2 {
+            x: FixedPoint::from_num(self.x),
+            y: FixedPoint::from_num(self.y),
+        }
+    }
 }
