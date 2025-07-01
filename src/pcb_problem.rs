@@ -13,7 +13,7 @@ use ordered_float::NotNan;
 use rand::distr::{weighted::WeightedIndex, Distribution};
 
 use crate::{
-    astar::AStarModel, hyperparameters::{ITERATION_TO_NUM_TRACES, ITERATION_TO_PRIOR_PROBABILITY, MAX_GENERATION_ATTEMPTS, NEXT_ITERATION_TO_REMAINING_PROBABILITY}, pad::Pad, pcb_render_model::{PcbRenderModel, UpdatePcbRenderModel}, prim_shape::PrimShape, trace_path::{TraceAnchors, TracePath}, vec2::{FixedPoint, FixedVec2}
+    astar::AStarModel, hyperparameters::{CONSTANT_LEARNING_RATE, ITERATION_TO_NUM_TRACES, ITERATION_TO_PRIOR_PROBABILITY, LINEAR_LEARNING_RATE, MAX_GENERATION_ATTEMPTS, NEXT_ITERATION_TO_REMAINING_PROBABILITY, OPPORTUNITY_COST_WEIGHT, SCORE_WEIGHT}, pad::Pad, pcb_render_model::{PcbRenderModel, UpdatePcbRenderModel}, prim_shape::PrimShape, trace_path::{TraceAnchors, TracePath}, vec2::{FixedPoint, FixedVec2}
 };
 
 // use shared::interface_types::{Color, ColorGrid};
@@ -248,13 +248,30 @@ impl ProbaModel {
             collision_adjacency: HashMap::new(),
             next_iteration: NonZeroUsize::new(1).expect("Next iteration must be non-zero"),
         };
-        // submit renderable and block the thread
-        let render_model = proba_model.to_pcb_render_model(problem);
-        pcb_render_model.update_pcb_render_model(render_model);
-        let mut input = String::new();
-        let _ = std::io::stdin().read_line(&mut input).unwrap();
+        // display and block
+        let display_and_block = |proba_model: &ProbaModel|{
+            let render_model = proba_model.to_pcb_render_model(problem);
+            pcb_render_model.update_pcb_render_model(render_model);
+            println!("Press Enter to continue...");
+            let mut input = String::new();
+            let _ = std::io::stdin().read_line(&mut input).unwrap();
+        };
+        display_and_block(&proba_model);
+        
 
-        todo!()
+        // sample and then update posterior
+        for j in 0..4{
+            println!("Sampling new traces for iteration {}", j + 1);
+            proba_model.sample_new_traces(problem)?;
+            display_and_block(&proba_model);
+
+            for i in 0..10{
+                println!("Updating posterior for the {}th time", i + 1);
+                proba_model.update_posterior()?;
+                display_and_block(&proba_model);
+            }
+        }
+        Ok(proba_model)
     }
 
     fn sample_new_traces(&mut self, problem: &PcbProblem) -> Result<(), String> {
@@ -616,12 +633,122 @@ impl ProbaModel {
         };
         todo!("Convert ProbaModel to PcbRenderModel");
     }
+
+    pub fn update_posterior(&mut self)->Result<(), String>{
+        let proba_traces: HashMap<ProbaTraceID, Rc<ProbaTrace>> = self.connection_to_traces
+            .values()
+            .filter_map(|traces| {
+                if let Traces::Probabilistic(trace_map) = traces {
+                    Some(trace_map.clone())
+                } else {
+                    None // Skip fixed traces
+                }
+            })
+            .flatten()
+            .collect();
+        // Update the posterior probabilities for all traces in the model
+        for (proba_trace_id, proba_trace) in proba_traces.iter() {
+            let adjacent_traces = self.collision_adjacency
+                .get(proba_trace_id)
+                .expect(format!("No adjacent traces for ProbaTraceID {:?}", proba_trace_id).as_str());
+            let mut proba_product = 1.0;
+            for adjacent_trace_id in adjacent_traces.iter() {
+                let adjacent_trace = proba_traces.get(adjacent_trace_id).expect(
+                    format!("No ProbaTraceID {:?} found in proba_traces", adjacent_trace_id).as_str(),
+                );
+                let posterior = adjacent_trace.get_posterior_with_fallback();
+                // to do: update this
+                let one_minus_posterior = (1.0 - posterior).max(0.0); // Ensure non-negative
+                proba_product *= one_minus_posterior;
+            }
+            let target_posterior = proba_product;
+            assert!(
+                target_posterior >= 0.0 && target_posterior <= 1.0,
+                "Target posterior must be between 0 and 1"
+            );
+            // get num traces in the same iteration
+            let current_posterior = proba_trace.get_posterior_with_fallback();
+            let opportunity_cost = target_posterior / current_posterior;
+            let score = proba_trace.trace_path.get_score();
+            let score_weight = *SCORE_WEIGHT.lock().unwrap();
+            let opportunity_cost_weight = *OPPORTUNITY_COST_WEIGHT.lock().unwrap();
+            let target_posterior_unnormalized = 1.0
+                * f64::powf(score, score_weight)
+                * f64::powf(opportunity_cost, opportunity_cost_weight);
+            let target_posterior_normalized = proba_trace
+                .get_normalized_prior()
+                * target_posterior_unnormalized;            
+            let mut temp_posterior = proba_trace.temp_posterior.borrow_mut();
+            let target_greater_than_current = target_posterior_normalized > current_posterior;
+            let constant_offset = if target_greater_than_current {
+                CONSTANT_LEARNING_RATE
+            } else {
+                -CONSTANT_LEARNING_RATE
+            };
+            let new_posterior = current_posterior
+                + (target_posterior_normalized - current_posterior) * LINEAR_LEARNING_RATE
+                + constant_offset;
+            let new_posterior = if target_greater_than_current{
+                new_posterior.max(target_posterior_normalized)
+            } else {
+                new_posterior.min(target_posterior_normalized)
+            };
+            *temp_posterior = Some(new_posterior);
+        }
+        // move temp_posterior to posterior
+        for(_, proba_trace) in proba_traces.iter() {
+            let mut posterior = proba_trace.posterior.borrow_mut();
+            let mut temp_posterior = proba_trace.temp_posterior.borrow_mut();
+            let temp_posterior_val = temp_posterior.unwrap();
+            *posterior = Some(temp_posterior_val);
+            // reset temp_posterior
+            *temp_posterior = None;
+        }
+        Ok(())
+    }
 }
 
 pub struct Node {
     pub remaining_trace_candidates: BinaryHeap<(NotNan<f64>, ProbaTraceID)>, // The remaining trace candidates to be processed, sorted by their scores)>
     pub fixed_traces: HashMap<ConnectionID, FixedTrace>,
     pub prob_up_to_date: bool, // Whether the probabilistic model is up to date
+}
+
+impl Node{
+    pub fn from_proba_model(
+        proba_model: &ProbaModel,
+    )->Self{
+        let mut fixed_traces: HashMap<ConnectionID, FixedTrace> = HashMap::new();
+        let mut remaining_trace_candidates: BinaryHeap<(NotNan<f64>, ProbaTraceID)> = BinaryHeap::new();
+        for (connection_id, traces) in proba_model.connection_to_traces.iter() {
+            match traces {
+                Traces::Fixed(fixed_trace) => {
+                    fixed_traces.insert(*connection_id, fixed_trace.clone());
+                }
+                Traces::Probabilistic(trace_map) => {
+                    for (proba_trace_id, proba_trace) in trace_map.iter() {
+                        let posterior = proba_trace.get_posterior_with_fallback();
+                        let not_nan_proba = NotNan::new(posterior).expect("Probability must be non-NaN");
+                        remaining_trace_candidates.push((not_nan_proba, *proba_trace_id));
+                    }
+                }
+            }
+        }
+        Node {
+            remaining_trace_candidates,
+            fixed_traces,
+            prob_up_to_date: true, // Initially, the probabilistic model is up to date
+        }
+    }
+    /// If an attemp fails, return error; it will pop the priority queue in both scenarios
+    pub fn try_fix_a_trace(&mut self)->Result<Self, String>{
+        // for self, peek from the priority queue
+        // if succeed, remove all traces from the same connection, and generate a new node with the same priority queue and a fixed trace
+        // if fail, return error
+        
+
+        todo!()
+    }
 }
 
 pub struct PcbSolution {
@@ -676,9 +803,15 @@ impl PcbProblem {
         connection_id
     }
 
-    pub fn solve(&self) -> PcbSolution {
+    pub fn solve(&self, pcb_render_model: Arc<Mutex<PcbRenderModel>>) -> Result<PcbSolution, String> {
         let node_stack: Vec<Node> = Vec::new();
-        //  let first_node =
+        let first_proba_model = ProbaModel::create_and_solve(
+            self, 
+            &HashMap::new(), // No fixed traces for the initial problem
+            pcb_render_model
+        )?;
+
+        
         todo!()
     }
 

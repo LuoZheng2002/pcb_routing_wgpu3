@@ -22,6 +22,9 @@ pub const FOURTH_ITERATION_NUM_TRACES: usize = 2;
 pub const MAX_ITERATION: NonZeroUsize =
     NonZeroUsize::new(4).expect("MAX_ITERATION must be non-zero");
 
+pub const LINEAR_LEARNING_RATE: f64 = 0.2;
+pub const CONSTANT_LEARNING_RATE: f64 = 0.01;
+
 lazy_static! {
     pub static ref SCORE_WEIGHT: Mutex<f64> = Mutex::new(0.3);
     pub static ref OPPORTUNITY_COST_WEIGHT: Mutex<f64> = Mutex::new(0.3);

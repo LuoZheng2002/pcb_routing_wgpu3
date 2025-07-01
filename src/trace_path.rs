@@ -134,4 +134,9 @@ impl TracePath {
         }
         false
     }
+
+    pub fn get_score(&self) -> f64 {
+        // to do
+        1.0
+    }
 }
