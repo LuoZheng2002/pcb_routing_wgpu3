@@ -19,3 +19,4 @@ pub mod vec2;
 pub mod vertex;
 pub mod astar;
 pub mod binary_heap_item;
+pub mod working_thread_fn;

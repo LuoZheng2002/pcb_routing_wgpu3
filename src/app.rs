@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use winit::{
     application::ApplicationHandler,
@@ -10,7 +10,7 @@ use winit::{
 
 use crate::{
     context::Context,
-    render_context::{RenderContext},
+    render_context::RenderContext, working_thread_fn,
 };
 
 // thread_local! {
@@ -36,6 +36,11 @@ impl ApplicationHandler for App {
         let mut state = self.context.state.borrow_mut();
         state.init();
         self.window = Some(window);
+        let pcb_render_model = self.context.pcb_render_model.clone();
+        let mut working_thread = self.context.working_thread.lock().unwrap();
+        *working_thread = Some(std::thread::spawn(move || {
+            working_thread_fn::working_thread_fn(pcb_render_model);
+        }));
     }
     fn device_event(
         &mut self,
@@ -61,7 +66,7 @@ impl ApplicationHandler for App {
                 let render_context = self.context.render_context.as_ref().unwrap();
                 let size = *render_context.size.borrow();
                 let mut state = self.context.state.borrow_mut();
-                state.update(render_context);
+                state.update(render_context, self.context.pcb_render_model.clone());
                 match render_context.render(&state) {
                     Ok(_) => {}
                     // Reconfigure the surface if it's lost or outdated
@@ -71,6 +76,9 @@ impl ApplicationHandler for App {
                     // The system is out of memory, we should probably quit
                     Err(wgpu::SurfaceError::OutOfMemory | wgpu::SurfaceError::Other) => {
                         log::error!("OutOfMemory");
+                        let mut working_thread = self.context.working_thread.lock().unwrap();
+                        let working_thread = working_thread.take().unwrap();
+                        working_thread.join().unwrap();
                         event_loop.exit();
                     }
 

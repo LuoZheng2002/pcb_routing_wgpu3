@@ -1,11 +1,9 @@
-use std::time::Instant;
+use std::{sync::{Arc, Mutex}, time::Instant};
 
 use cgmath::{Euler, Quaternion};
 
 use crate::{
-    orthographic_camera::OrthographicCamera,
-    render_context::RenderContext, shape_instance::ShapeInstance,
-    transparent_pipeline::TransparentShapeBatch,
+    orthographic_camera::OrthographicCamera, pad::PadShape, pcb_render_model::{self, PcbRenderModel}, prim_shape::{CircleShape, PrimShape, RectangleShape}, render_context::RenderContext, shape_instance::ShapeInstance, shape_mesh::ShapeMesh, transparent_pipeline::TransparentShapeBatch
 };
 
 // model path,
@@ -21,14 +19,18 @@ pub struct State {
     pub transparent_shape_submissions: Option<Vec<TransparentShapeBatch>>,
     pub fps: u32,
 
-    pub pcb_width: f32,
-    pub pcb_height: f32,
+    // pub pcb_width: f32,
+    // pub pcb_height: f32,
 }
 
 impl State {
     pub fn init(&mut self) {}
 
-    pub fn update(&mut self, render_context: &RenderContext) {
+    pub fn update(
+        &mut self, 
+        render_context: &RenderContext,
+        pcb_render_model: Arc<Mutex<PcbRenderModel>>,
+    ) {
         // calculate fps every 1 second
         let fps_timer = self.fps_timer.get_or_insert_with(|| Instant::now());
         let cursor_timer = self.cursor_timer.get_or_insert_with(|| Instant::now());
@@ -55,9 +57,11 @@ impl State {
         assert!(delta_time >= 0.0);
         // let speed = 0.1;
         // let delta_angle = current_time * speed;
-
+        let pcb_render_model = pcb_render_model.lock().unwrap();
+        let pcb_width = pcb_render_model.width;
+        let pcb_height = pcb_render_model.height;
         // update camera
-        let pcb_aspect_ratio = self.pcb_width / self.pcb_height;
+        let pcb_aspect_ratio = pcb_width / pcb_height;
         let screen_aspect_ratio = {
             let size = *render_context.size.borrow();
             size.width as f32 / size.height as f32
@@ -65,11 +69,11 @@ impl State {
         let pcb_margin_scale: f32 = 1.2;
         let (orthographic_width, orthographic_height) = {
             if pcb_aspect_ratio > screen_aspect_ratio {
-                let orthographic_width = self.pcb_width * pcb_margin_scale;
+                let orthographic_width = pcb_width * pcb_margin_scale;
                 let orthographic_height = orthographic_width / screen_aspect_ratio;
                 (orthographic_width, orthographic_height)
             } else {
-                let orthographic_height = self.pcb_height * pcb_margin_scale;
+                let orthographic_height = pcb_height * pcb_margin_scale;
                 let orthographic_width = orthographic_height * screen_aspect_ratio;
                 (orthographic_width, orthographic_height)
             }
@@ -84,46 +88,119 @@ impl State {
         self.camera.bottom = -orthographic_height / 2.0;
         self.camera.top = orthographic_height / 2.0;
         // render submissions
-        let mesh1 = render_context.circle_mesh.clone();
-
-        let instance1 = ShapeInstance {
-            position: [0.0, 0.0, 0.0].into(),
-            rotation: Quaternion::from(Euler::new(
-                cgmath::Deg(0.0),
-                cgmath::Deg(0.0),
-                cgmath::Deg(0.0),
-            )),
-            scale: cgmath::Vector3::new(1.27, 1.27, 1.27),
-            color: [1.0, 0.0, 0.0, 0.9],
-        };
-
-        let instance2 = ShapeInstance {
-            position: [2.54, 0.0, 0.0].into(),
-            rotation: Quaternion::from(Euler::new(
-                cgmath::Deg(0.0),
-                cgmath::Deg(0.0),
-                cgmath::Deg(0.0),
-            )),
-            scale: cgmath::Vector3::new(1.27, 1.27, 1.27),
-            color: [1.0, 0.0, 0.0, 0.9],
-        };
-
-        let pcb_rect_mesh = render_context.square_mesh.clone();
-        let pcb_rect_instance = ShapeInstance {
-            position: [0.0, 0.0, 0.0].into(),
-            rotation: Quaternion::from(Euler::new(
-                cgmath::Deg(0.0),
-                cgmath::Deg(0.0),
-                cgmath::Deg(0.0),
-            )),
-            scale: cgmath::Vector3::new(self.pcb_width, self.pcb_height, 1.0),
-            color: [1.0, 1.0, 1.0, 0.3],
-        };
-        let pcb_rect_batch = TransparentShapeBatch(vec![(pcb_rect_mesh, vec![pcb_rect_instance])]);
-        let pad_batch = TransparentShapeBatch(vec![(mesh1, vec![instance1, instance2])]);
-        self.transparent_shape_submissions = Some(vec![pcb_rect_batch, pad_batch]);
+        let circle_mesh = render_context.circle_mesh.clone();
+        let rect_mesh = render_context.square_mesh.clone();
+        let submissions = pcb_render_model_to_transparent_shape_submissions(&pcb_render_model, circle_mesh, rect_mesh);
+        self.transparent_shape_submissions = Some(submissions);
         // self.transparent_shape_submissions = Some(vec![pcb_rect_batch]);
     }
+}
+
+pub fn pcb_render_model_to_transparent_shape_submissions(
+    pcb_render_model: &PcbRenderModel,
+    circle_mesh: Arc<ShapeMesh>,
+    rect_mesh: Arc<ShapeMesh>,
+) -> Vec<TransparentShapeBatch> {
+    
+    let mut submissions = Vec::new();
+
+    // Add PCB rectangle
+    let pcb_rect_instance = ShapeInstance {
+        position: [0.0, 0.0, 0.0].into(),
+        rotation: Quaternion::from(Euler::new(
+            cgmath::Deg(0.0),
+            cgmath::Deg(0.0),
+            cgmath::Deg(0.0),
+        )),
+        scale: cgmath::Vector3::new(pcb_render_model.width, pcb_render_model.height, 1.0),
+        color: [1.0, 1.0, 1.0, 0.3],
+    };
+    let pcb_rect_batch = TransparentShapeBatch(vec![(rect_mesh.clone(), vec![pcb_rect_instance])]);
+    submissions.push(pcb_rect_batch);
+
+    // Add pads
+    for renderable in &pcb_render_model.pad_shape_renderables {
+        let color = renderable.color;
+        match &renderable.shape{
+            PrimShape::Circle(circle_shape) =>{
+                let CircleShape { diameter, position } = circle_shape;
+                let circle_instance = ShapeInstance {
+                    position: [position.x, position.y, 0.0].into(),
+                    rotation: Quaternion::from(Euler::new(
+                        cgmath::Deg(0.0),
+                        cgmath::Deg(0.0),
+                        cgmath::Deg(0.0),
+                    )),
+                    scale: cgmath::Vector3::new(*diameter, *diameter, 1.0),
+                    color,
+                };
+                let circle_batch = TransparentShapeBatch(vec![(circle_mesh.clone(), vec![circle_instance])]);
+                submissions.push(circle_batch);
+            },
+            PrimShape::Rectangle(rect_shape) => {
+                let RectangleShape { width, height , position, rotation} = rect_shape;
+                let rect_instance = ShapeInstance {
+                    position: [position.x, position.y, 0.0].into(),
+                    rotation: Quaternion::from(Euler::new(
+                        cgmath::Deg(0.0),
+                        cgmath::Deg(0.0),
+                        *rotation,
+                    )),
+                    scale: cgmath::Vector3::new(*width, *height, 1.0),
+                    color,
+                };
+                let rect_batch = TransparentShapeBatch(vec![(rect_mesh.clone(), vec![rect_instance])]);
+                submissions.push(rect_batch);
+            },
+        }
+    }
+    // add traces
+    for trace in &pcb_render_model.trace_shape_renderables {
+        let mut circle_instances: Vec<ShapeInstance> = Vec::new();
+        let mut rect_instances: Vec<ShapeInstance> = Vec::new();
+        for renderable in &trace.0{
+            let color = renderable.color;
+            match &renderable.shape{
+                PrimShape::Circle(circle_shape) =>{
+                    let CircleShape { diameter, position } = circle_shape;
+                    let circle_instance = ShapeInstance {
+                        position: [position.x, position.y, 0.0].into(),
+                        rotation: Quaternion::from(Euler::new(
+                            cgmath::Deg(0.0),
+                            cgmath::Deg(0.0),
+                            cgmath::Deg(0.0),
+                        )),
+                        scale: cgmath::Vector3::new(*diameter, *diameter, 1.0),
+                        color,
+                    };
+                    circle_instances.push(circle_instance);
+                },
+                PrimShape::Rectangle(rect_shape) => {
+                    let RectangleShape { width, height , position, rotation} = rect_shape;
+                    let rect_instance = ShapeInstance {
+                        position: [position.x, position.y, 0.0].into(),
+                        rotation: Quaternion::from(Euler::new(
+                            cgmath::Deg(0.0),
+                            cgmath::Deg(0.0),
+                            *rotation,
+                        )),
+                        scale: cgmath::Vector3::new(*width, *height, 1.0),
+                        color,
+                    };
+                    rect_instances.push(rect_instance);
+                },
+            }
+        }      
+        if !circle_instances.is_empty() {
+            let circle_batch = TransparentShapeBatch(vec![(circle_mesh.clone(), circle_instances)]);
+            submissions.push(circle_batch);
+        }
+        if !rect_instances.is_empty() {
+            let rect_batch = TransparentShapeBatch(vec![(rect_mesh.clone(), rect_instances)]);
+            submissions.push(rect_batch);
+        }  
+    }
+    submissions
 }
 
 impl Default for State {
@@ -147,8 +224,8 @@ impl Default for State {
             accumulated_frame_num: 0,
             transparent_shape_submissions: None,
             fps: 0,
-            pcb_width: 15.0,
-            pcb_height: 10.0,
+            // pcb_width: 15.0,
+            // pcb_height: 10.0,
         }
     }
 }

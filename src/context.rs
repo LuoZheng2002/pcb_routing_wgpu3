@@ -14,4 +14,5 @@ pub struct Context {
     pub state: RefCell<State>,
     pub input_context: RefCell<InputContext>,
     pub pcb_render_model: Arc<Mutex<PcbRenderModel>>,
+    pub working_thread: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
 }
