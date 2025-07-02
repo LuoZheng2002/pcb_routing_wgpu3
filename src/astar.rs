@@ -1,8 +1,8 @@
-use std::{cell::RefCell, cmp::Reverse, collections::{BinaryHeap, HashMap, HashSet}, rc::Rc, sync::{Arc, Mutex}};
+use std::{cell::RefCell, cmp::Reverse, collections::{BinaryHeap, HashSet}, rc::Rc, sync::{Arc, Mutex}};
 
 use ordered_float::NotNan;
 
-use crate::{binary_heap_item::BinaryHeapItem, hyperparameters::{ASTAR_STRIDE, TURN_PENALTY}, pad::PadShape, pcb_render_model::{PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::{CircleShape, PrimShape, RectangleShape}, trace_path::{Direction, TraceAnchors, TracePath, TraceSegment}, vec2::{FixedPoint, FixedVec2, FloatVec2}};
+use crate::{binary_heap_item::BinaryHeapItem, hyperparameters::{ASTAR_STRIDE, TURN_PENALTY}, pcb_render_model::{PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::{CircleShape, PrimShape, RectangleShape}, trace_path::{Direction, TraceAnchors, TracePath, TraceSegment}, vec2::{FixedPoint, FixedVec2, FloatVec2}};
 
 
 

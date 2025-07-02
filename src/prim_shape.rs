@@ -1,6 +1,6 @@
 use cgmath::{Rotation, Rotation2};
 
-use crate::vec2::{FixedPoint, FloatVec2};
+use crate::vec2::FloatVec2;
 
 
 #[derive(Debug, Clone)]

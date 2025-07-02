@@ -1,19 +1,17 @@
-use core::{num, panic};
+use core::panic;
 use std::{
     cell::RefCell,
     collections::{BTreeSet, BinaryHeap, HashMap, HashSet},
     num::NonZeroUsize,
     rc::Rc,
     sync::{Arc, Mutex},
-    vec,
 };
 
-use futures::sink;
 use ordered_float::NotNan;
 use rand::distr::{weighted::WeightedIndex, Distribution};
 
 use crate::{
-    astar::AStarModel, binary_heap_item::BinaryHeapItem, hyperparameters::{CONSTANT_LEARNING_RATE, ITERATION_TO_NUM_TRACES, ITERATION_TO_PRIOR_PROBABILITY, LINEAR_LEARNING_RATE, MAX_GENERATION_ATTEMPTS, NEXT_ITERATION_TO_REMAINING_PROBABILITY, OPPORTUNITY_COST_WEIGHT, SCORE_WEIGHT}, pad::Pad, pcb_render_model::{self, PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::PrimShape, trace_path::{TraceAnchors, TracePath}, vec2::{FixedPoint, FixedVec2}
+    astar::AStarModel, binary_heap_item::BinaryHeapItem, hyperparameters::{CONSTANT_LEARNING_RATE, ITERATION_TO_NUM_TRACES, ITERATION_TO_PRIOR_PROBABILITY, LINEAR_LEARNING_RATE, MAX_GENERATION_ATTEMPTS, NEXT_ITERATION_TO_REMAINING_PROBABILITY, OPPORTUNITY_COST_WEIGHT, SCORE_WEIGHT}, pad::Pad, pcb_render_model::{PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::PrimShape, trace_path::{TraceAnchors, TracePath}, vec2::FixedVec2
 };
 
 // use shared::interface_types::{Color, ColorGrid};
@@ -771,7 +769,7 @@ impl Node{
                     fixed_traces.insert(*connection_id, fixed_trace.clone());
                 }
                 Traces::Probabilistic(trace_map) => {
-                    for (proba_trace_id, proba_trace) in trace_map.iter() {
+                    for (_proba_trace_id, proba_trace) in trace_map.iter() {
                         let posterior = proba_trace.get_posterior_with_fallback();
                         let not_nan_proba = NotNan::new(posterior).expect("Probability must be non-NaN");
                         remaining_trace_candidates.push(BinaryHeapItem{

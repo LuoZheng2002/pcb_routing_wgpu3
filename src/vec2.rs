@@ -1,6 +1,3 @@
-use fixed::traits::Fixed;
-use ordered_float::Float;
-
 pub type FixedPoint = fixed::types::I24F8;
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq, Copy, PartialOrd, Ord)]

@@ -1,7 +1,5 @@
 use std::{
-    cell::{Ref, RefCell},
-    collections::HashMap,
-    mem,
+    cell::RefCell,
     sync::Arc,
 };
 
@@ -15,7 +13,7 @@ use crate::{
     my_texture::MyTexture,
     shape_mesh::ShapeMesh,
     state::State,
-    transparent_pipeline::{self, TransparentPipeline},
+    transparent_pipeline::{TransparentPipeline},
     vertex::Vertex, // ui_pipeline::UIPipeline,
 };
 
@@ -65,7 +63,7 @@ impl RenderContext {
             }))
             .unwrap();
 
-        let surface_caps = surface.get_capabilities(&adapter);
+        let _surface_caps = surface.get_capabilities(&adapter);
         // Shader code in this tutorial assumes an sRGB surface texture. Using a different
         // one will result in all the colors coming out darker. If you want to support non
         // sRGB surfaces, you'll need to account for that when drawing to the frame.

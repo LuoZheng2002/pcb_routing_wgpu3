@@ -1,4 +1,4 @@
-use std::{cell::RefCell, process::exit, sync::Arc};
+use std::sync::Arc;
 
 use winit::{
     application::ApplicationHandler,
@@ -10,9 +10,7 @@ use winit::{
 
 use crate::{
     context::Context,
-    input_context::{self, InputContext},
-    render_context::{self, RenderContext},
-    state::State,
+    render_context::{RenderContext},
 };
 
 // thread_local! {
@@ -49,7 +47,7 @@ impl ApplicationHandler for App {
         input_context.handle_device_event(&event);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let mut input_context = self.context.input_context.borrow_mut();
         input_context.handle_window_event(&event);
         match event {

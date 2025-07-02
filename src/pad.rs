@@ -1,5 +1,5 @@
 use crate::{
-    pcb_render_model::ShapeRenderable, prim_shape::{CircleShape, PrimShape, RectangleShape}, vec2::{FixedPoint, FixedVec2, FloatVec2}
+    pcb_render_model::ShapeRenderable, prim_shape::{CircleShape, PrimShape, RectangleShape}, vec2::FloatVec2
 };
 
 #[derive(Debug, Clone)]

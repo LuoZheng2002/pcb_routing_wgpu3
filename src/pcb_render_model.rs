@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use crate::{pad::PadShape, prim_shape::PrimShape, vec2::FloatVec2};
+use crate::prim_shape::PrimShape;
 
 #[derive(Debug, Clone)]
 pub struct ShapeRenderable{

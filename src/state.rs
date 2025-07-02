@@ -1,16 +1,11 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Instant,
-};
+use std::time::Instant;
 
 use cgmath::{Euler, Quaternion};
-use wgpu::util::DeviceExt;
 
 use crate::{
-    input_context::InputContext, orthographic_camera::OrthographicCamera,
-    render_context::RenderContext, shape_instance::ShapeInstance, shape_mesh::ShapeMesh,
-    transparent_pipeline::TransparentShapeBatch, vertex::Vertex,
+    orthographic_camera::OrthographicCamera,
+    render_context::RenderContext, shape_instance::ShapeInstance,
+    transparent_pipeline::TransparentShapeBatch,
 };
 
 // model path,
@@ -47,19 +42,19 @@ impl State {
             self.accumulated_frame_num += 1;
         }
         let current_cursor_time = cursor_timer.elapsed().as_secs_f32();
-        let mut cursor_blink = false;
+        // let mut cursor_blink = false;
         if current_cursor_time >= 0.5 {
             // println!("cursor: {:?}", input_context.mouse_position());
             *cursor_timer = Instant::now();
-            cursor_blink = true;
+            // cursor_blink = true;
         }
         let timer = self.timer.get_or_insert_with(|| Instant::now());
         let current_time = timer.elapsed().as_secs_f32();
         let prev_time = self.prev_time.get_or_insert(current_time);
         let delta_time = current_time - *prev_time;
         assert!(delta_time >= 0.0);
-        let speed = 0.1;
-        let delta_angle = current_time * speed;
+        // let speed = 0.1;
+        // let delta_angle = current_time * speed;
 
         // update camera
         let pcb_aspect_ratio = self.pcb_width / self.pcb_height;

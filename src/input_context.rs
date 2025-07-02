@@ -1,7 +1,7 @@
-use std::{collections::HashMap, result};
+use std::collections::HashMap;
 use winit::{
     event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
-    keyboard::{Key, KeyCode, NamedKey, PhysicalKey},
+    keyboard::{KeyCode, PhysicalKey},
 };
 #[derive(Default)]
 pub struct InputContext {
