@@ -16,6 +16,9 @@ impl FixedVec2 {
             y: self.y.to_num(),
         }
     }
+    pub fn length(&self) -> FixedPoint {
+        (self.x * self.x + self.y * self.y).sqrt()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -1,9 +1,8 @@
 use crate::{
-    prim_shape::PrimShape,
-    vec2::{FixedVec2, FloatVec2},
+    pcb_render_model::{RenderableBatch, ShapeRenderable}, prim_shape::PrimShape, vec2::{FixedVec2, FloatVec2}
 };
 
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, PartialOrd, Ord)]
 pub enum Direction {
     Up,
     Down,
@@ -26,6 +25,62 @@ impl Direction {
             Direction::DownRight => 315.0,
             Direction::DownLeft => 225.0,
         }
+    }
+    pub fn neighbor_directions(&self)-> Vec<Direction>{
+        let direction_to_int = |d: &Direction| match d {
+            Direction::Up => 0,
+            Direction::UpRight => 1,
+            Direction::Right => 2,
+            Direction::DownRight => 3,
+            Direction::Down => 4,
+            Direction::DownLeft => 5,
+            Direction::Left => 6,
+            Direction::UpLeft => 7,
+        };
+        let int_to_direction = |i: i32| match i {
+            0 => Direction::Up,
+            1 => Direction::UpRight,
+            2 => Direction::Right,
+            3 => Direction::DownRight,
+            4 => Direction::Down,
+            5 => Direction::DownLeft,
+            6 => Direction::Left,
+            7 => Direction::UpLeft,
+            _ => panic!("Invalid direction index"),
+        };
+        let self_int = direction_to_int(self);
+        let left_45_degree_dir = (self_int - 1 + 8) % 8; // wrap around using modulo
+        let right_45_degree_dir = (self_int + 1) % 8;
+        let straight_dir = self_int; // no change for straight direction
+        vec![
+            int_to_direction(left_45_degree_dir),
+            int_to_direction(straight_dir),
+            int_to_direction(right_45_degree_dir),
+        ]
+    }
+    pub fn all_directions() -> Vec<Direction> {
+        vec![
+            Direction::Up,
+            Direction::Down,
+            Direction::Left,
+            Direction::Right,
+            Direction::UpRight,
+            Direction::UpLeft,
+            Direction::DownRight,
+            Direction::DownLeft,
+        ]
+    }
+    pub fn to_fixed_vec2(&self) -> FixedVec2 {
+        match self {
+            Direction::Up => FloatVec2 { x: 0.0, y: 1.0 },
+            Direction::Down => FloatVec2 { x: 0.0, y: -1.0 },
+            Direction::Left => FloatVec2 { x: -1.0, y: 0.0 },
+            Direction::Right => FloatVec2 { x: 1.0, y: 0.0 },
+            Direction::UpRight => FloatVec2 { x: 1.0, y: 1.0 },
+            Direction::UpLeft => FloatVec2 { x: -1.0, y: 1.0 },
+            Direction::DownRight => FloatVec2 { x: 1.0, y: -1.0 },
+            Direction::DownLeft => FloatVec2 { x: -1.0, y: -1.0 },
+        }.to_fixed()
     }
 }
 
@@ -110,14 +165,32 @@ impl TraceSegment {
         }
         false
     }
+    pub fn to_renderables(&self, color: [f32;4])-> Vec<ShapeRenderable>{
+        let shapes = self.to_shapes();
+        shapes.into_iter().map(|shape| {
+            ShapeRenderable {
+                shape,
+                color,
+            }
+        }).collect()
+    }
+    pub fn to_clearance_renderables(&self, color: [f32;4]) -> Vec<ShapeRenderable> {
+        let clearance_shapes = self.to_clearance_shapes();
+        clearance_shapes.into_iter().map(|shape| {
+            ShapeRenderable {
+                shape,
+                color,
+            }
+        }).collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TraceAnchors(pub Vec<FixedVec2>); // List of turning points in the trace path, excluding start and end
+pub struct TraceAnchors(pub Vec<FixedVec2>); // List of turning points in the trace path, including start and end
 
 #[derive(Debug, Clone)]
 pub struct TracePath {
-    pub anchors: TraceAnchors, // List of turning points in the trace path, excluding start and end
+    pub anchors: TraceAnchors, // List of turning points in the trace path, including start and end
     pub segments: Vec<TraceSegment>, // List of segments in the trace path
     pub length: f64,
 }
@@ -138,5 +211,18 @@ impl TracePath {
     pub fn get_score(&self) -> f64 {
         // to do
         1.0
+    }
+
+    pub fn to_renderables(&self, color: [f32; 4]) -> RenderableBatch{
+        let mut renderables = Vec::new();
+        let clearance_color = [color[0], color[1], color[2], color[3]/2.0]; // semi-transparent color
+        // Render the segments
+        for segment in &self.segments {
+            let segment_renderables = segment.to_renderables(color);
+            let segment_clearance_renderables = segment.to_clearance_renderables(clearance_color); // semi-transparent color
+            renderables.extend(segment_renderables);
+            renderables.extend(segment_clearance_renderables);
+        }
+        RenderableBatch(renderables)
     }
 }

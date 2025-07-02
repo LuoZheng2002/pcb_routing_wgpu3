@@ -1,6 +1,5 @@
 use crate::{
-    prim_shape::PrimShape,
-    vec2::{FixedPoint, FixedVec2, FloatVec2},
+    pcb_render_model::ShapeRenderable, prim_shape::PrimShape, vec2::{FixedPoint, FixedVec2, FloatVec2}
 };
 
 #[derive(Debug, Clone)]
@@ -14,11 +13,6 @@ pub enum PadShape {
     Rectangle {
         width: f32,
         height: f32,
-    },
-    RoundedRect {
-        width: f32,
-        height: f32,
-        radius: f32, // Radius for the rounded corners
     },
 }
 
@@ -49,14 +43,46 @@ impl Pad {
                 height: *height,
                 rotation: self.rotation,
             }],
-            PadShape::RoundedRect {
-                width,
-                height,
-                radius,
-            } => todo!(),
         }
     }
     pub fn to_clearance_shapes(&self) -> Vec<PrimShape> {
-        todo!()
+        match &self.shape {
+            PadShape::Circle { diameter } => vec![PrimShape::Circle {
+                position: self.position,
+                diameter: diameter + self.clearance * 2.0,
+            }],
+            PadShape::Square { side_length } => vec![PrimShape::Rectangle {
+                position: self.position,
+                width: side_length + self.clearance * 2.0,
+                height: side_length + self.clearance * 2.0,
+                rotation: self.rotation,
+            }],
+            PadShape::Rectangle { width, height } => vec![PrimShape::Rectangle {
+                position: self.position,
+                width: width + self.clearance * 2.0,
+                height: height + self.clearance * 2.0,
+                rotation: self.rotation,
+            }],
+        }
+    }
+    pub fn to_renderables(&self, color: [f32; 4])-> Vec<ShapeRenderable> {
+        let shapes = self.to_shapes();
+        shapes
+            .into_iter()
+            .map(|shape| ShapeRenderable {
+                shape,
+                color,
+            })
+            .collect()
+    }
+    pub fn to_clearance_renderables(&self, color: [f32; 4]) -> Vec<ShapeRenderable> {
+        let clearance_shapes = self.to_clearance_shapes();
+        clearance_shapes
+            .into_iter()
+            .map(|shape| ShapeRenderable {
+                shape,
+                color,
+            })
+            .collect()
     }
 }

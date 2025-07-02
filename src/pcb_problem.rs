@@ -13,7 +13,7 @@ use ordered_float::NotNan;
 use rand::distr::{weighted::WeightedIndex, Distribution};
 
 use crate::{
-    astar::AStarModel, binary_heap_item::BinaryHeapItem, hyperparameters::{CONSTANT_LEARNING_RATE, ITERATION_TO_NUM_TRACES, ITERATION_TO_PRIOR_PROBABILITY, LINEAR_LEARNING_RATE, MAX_GENERATION_ATTEMPTS, NEXT_ITERATION_TO_REMAINING_PROBABILITY, OPPORTUNITY_COST_WEIGHT, SCORE_WEIGHT}, pad::Pad, pcb_render_model::{self, PcbRenderModel, UpdatePcbRenderModel}, prim_shape::PrimShape, trace_path::{TraceAnchors, TracePath}, vec2::{FixedPoint, FixedVec2}
+    astar::AStarModel, binary_heap_item::BinaryHeapItem, hyperparameters::{CONSTANT_LEARNING_RATE, ITERATION_TO_NUM_TRACES, ITERATION_TO_PRIOR_PROBABILITY, LINEAR_LEARNING_RATE, MAX_GENERATION_ATTEMPTS, NEXT_ITERATION_TO_REMAINING_PROBABILITY, OPPORTUNITY_COST_WEIGHT, SCORE_WEIGHT}, pad::Pad, pcb_render_model::{self, PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::PrimShape, trace_path::{TraceAnchors, TracePath}, vec2::{FixedPoint, FixedVec2}
 };
 
 // use shared::interface_types::{Color, ColorGrid};
@@ -25,6 +25,17 @@ pub struct Color {
     pub r: u8,
     pub g: u8,
     pub b: u8,
+}
+
+impl Color{
+    pub fn to_float4(&self, alpha: f32) -> [f32; 4] {
+        [
+            self.r as f32 / 255.0,
+            self.g as f32 / 255.0,
+            self.b as f32 / 255.0,
+            alpha,
+        ]
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -262,7 +273,7 @@ impl ProbaModel {
         // sample and then update posterior
         for j in 0..4{
             println!("Sampling new traces for iteration {}", j + 1);
-            proba_model.sample_new_traces(problem);
+            proba_model.sample_new_traces(problem, pcb_render_model.clone());
             display_and_block(&proba_model);
 
             for i in 0..10{
@@ -274,7 +285,7 @@ impl ProbaModel {
         proba_model
     }
 
-    fn sample_new_traces(&mut self, problem: &PcbProblem) {
+    fn sample_new_traces(&mut self, problem: &PcbProblem, pcb_render_model: Arc<Mutex<PcbRenderModel>>) {
         let mut new_proba_traces: Vec<Rc<ProbaTrace>> = Vec::new();
 
         // connection_id to connection
@@ -460,6 +471,9 @@ impl ProbaModel {
                     obstacle_clearance_shapes,
                     start: FixedVec2{x: Default::default(), y: Default::default()},
                     end: FixedVec2{x: Default::default(), y: Default::default()},
+                    trace_width: 0.0, // This will be set later
+                    trace_clearance: 0.0, // This will be set later
+                    border_cache: RefCell::new(None), // Cache for border points, initialized to None
                 };
                 let connections = &problem.nets
                     .get(net_id)
@@ -495,7 +509,7 @@ impl ProbaModel {
                     astar_model.start = connection.source.position.to_fixed();
                     astar_model.end = connection.sink.position.to_fixed();
                     // run A* algorithm to find a path
-                    let astar_result = astar_model.run();
+                    let astar_result = astar_model.run(pcb_render_model.clone());
                     let astar_result = match astar_result {
                         Ok(result) => result,
                         Err(err) => {
@@ -624,13 +638,43 @@ impl ProbaModel {
         self.next_iteration = NonZeroUsize::new(self.next_iteration.get() + 1).unwrap();
     }
     pub fn to_pcb_render_model(&self, problem: &PcbProblem) -> PcbRenderModel {
-        let mut pcb_render_model = PcbRenderModel {
+        let mut trace_shape_renderables: Vec<RenderableBatch> = Vec::new();
+        let mut pad_shape_renderables: Vec<ShapeRenderable> = Vec::new();
+        for (_, net_info) in problem.nets.iter() {
+            for (_, connection) in net_info.connections.iter() {
+                // Add fixed traces
+                if let Some(Traces::Fixed(fixed_trace)) = self.connection_to_traces.get(&connection.connection_id) {
+                    let color = net_info.color.to_float4(1.0);
+                    let renderable_batch = fixed_trace.trace_path.to_renderables(color);
+                    trace_shape_renderables.push(renderable_batch);
+                }
+                // Add probabilistic traces
+                if let Some(Traces::Probabilistic(trace_map)) = self.connection_to_traces.get(&connection.connection_id) {
+                    for proba_trace in trace_map.values() {
+                        let posterior = proba_trace.get_posterior_with_fallback();
+                        let posterior = posterior.clamp(0.0, 1.0); // Ensure posterior is between 0 and 1
+                        let color = net_info.color.to_float4(posterior as f32);
+                        let renderable_batch = proba_trace.trace_path.to_renderables(color);
+                        trace_shape_renderables.push(renderable_batch);
+                    }
+                }
+                // Add pads
+                let source_renderables = connection.source.to_renderables(net_info.color.to_float4(1.0));
+                let source_clearance_renderables = connection.source.to_clearance_renderables(net_info.color.to_float4(1.0));
+                let sink_renderables = connection.sink.to_renderables(net_info.color.to_float4(1.0));
+                let sink_clearance_renderables = connection.sink.to_clearance_renderables(net_info.color.to_float4(1.0));
+                pad_shape_renderables.extend(source_renderables);
+                pad_shape_renderables.extend(source_clearance_renderables);
+                pad_shape_renderables.extend(sink_renderables);
+                pad_shape_renderables.extend(sink_clearance_renderables);
+            }
+        }
+        PcbRenderModel {
             width: problem.width,
             height: problem.height,
-            pad_renderables: Vec::new(), // Will be filled with pads from the problem
-            trace_segment_renderables: Vec::new(), // Will be filled with traces from the model
-        };
-        todo!("Convert ProbaModel to PcbRenderModel");
+            trace_shape_renderables,
+            pad_shape_renderables,
+        }
     }
 
     pub fn update_posterior(&mut self){
@@ -978,9 +1022,5 @@ impl PcbProblem {
             }
         }
         Err("No solution found".to_string())
-    }
-
-    pub fn collides_with_border(&self) -> bool {
-        todo!()
     }
 }

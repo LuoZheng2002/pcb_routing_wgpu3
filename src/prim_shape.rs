@@ -1,5 +1,6 @@
 use crate::vec2::{FixedPoint, FixedVec2, FloatVec2};
 
+#[derive(Debug, Clone)]
 pub enum PrimShape {
     Circle {
         position: FloatVec2,
