@@ -1,5 +1,5 @@
 use crate::{
-    pcb_render_model::ShapeRenderable, prim_shape::PrimShape, vec2::{FixedPoint, FixedVec2, FloatVec2}
+    pcb_render_model::ShapeRenderable, prim_shape::{CircleShape, PrimShape, RectangleShape}, vec2::{FixedPoint, FixedVec2, FloatVec2}
 };
 
 #[derive(Debug, Clone)]
@@ -27,42 +27,54 @@ pub struct Pad {
 impl Pad {
     pub fn to_shapes(&self) -> Vec<PrimShape> {
         match &self.shape {
-            PadShape::Circle { diameter } => vec![PrimShape::Circle {
-                position: self.position,
-                diameter: *diameter,
-            }],
-            PadShape::Square { side_length } => vec![PrimShape::Rectangle {
-                position: self.position,
-                width: *side_length,
-                height: *side_length,
-                rotation: self.rotation,
-            }],
-            PadShape::Rectangle { width, height } => vec![PrimShape::Rectangle {
-                position: self.position,
-                width: *width,
-                height: *height,
-                rotation: self.rotation,
-            }],
+            PadShape::Circle { diameter } => vec![PrimShape::Circle (
+                CircleShape {
+                    position: self.position,
+                    diameter: *diameter,
+                }
+            )],
+            PadShape::Square { side_length } => vec![PrimShape::Rectangle (
+                RectangleShape {
+                    position: self.position,
+                    width: *side_length,
+                    height: *side_length,
+                    rotation: self.rotation,
+                }
+            )],
+            PadShape::Rectangle { width, height } => vec![PrimShape::Rectangle (
+                RectangleShape {
+                    position: self.position,
+                    width: *width,
+                    height: *height,
+                    rotation: self.rotation,
+                }
+            )],
         }
     }
     pub fn to_clearance_shapes(&self) -> Vec<PrimShape> {
-        match &self.shape {
-            PadShape::Circle { diameter } => vec![PrimShape::Circle {
-                position: self.position,
-                diameter: diameter + self.clearance * 2.0,
-            }],
-            PadShape::Square { side_length } => vec![PrimShape::Rectangle {
-                position: self.position,
-                width: side_length + self.clearance * 2.0,
-                height: side_length + self.clearance * 2.0,
-                rotation: self.rotation,
-            }],
-            PadShape::Rectangle { width, height } => vec![PrimShape::Rectangle {
-                position: self.position,
-                width: width + self.clearance * 2.0,
-                height: height + self.clearance * 2.0,
-                rotation: self.rotation,
-            }],
+        match &self.shape {            
+            PadShape::Circle { diameter } => vec![PrimShape::Circle(
+                CircleShape {
+                    position: self.position,
+                    diameter: diameter + self.clearance * 2.0,
+                }
+            )],
+            PadShape::Square { side_length } => vec![PrimShape::Rectangle(
+                RectangleShape {
+                    position: self.position,
+                    width: side_length + self.clearance * 2.0,
+                    height: side_length + self.clearance * 2.0,
+                    rotation: self.rotation,
+                }
+            )],
+            PadShape::Rectangle { width, height } => vec![PrimShape::Rectangle(
+                RectangleShape {
+                    position: self.position,
+                    width: width + self.clearance * 2.0,
+                    height: height + self.clearance * 2.0,
+                    rotation: self.rotation,
+                }
+            )],
         }
     }
     pub fn to_renderables(&self, color: [f32; 4])-> Vec<ShapeRenderable> {

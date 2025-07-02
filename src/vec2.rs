@@ -4,12 +4,12 @@ use ordered_float::Float;
 pub type FixedPoint = fixed::types::I24F8;
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq, Copy, PartialOrd, Ord)]
-pub struct FixedFloatVec2 {
+pub struct FixedVec2 {
     pub x: FixedPoint,
     pub y: FixedPoint,
 }
 
-impl FixedFloatVec2 {
+impl FixedVec2 {
     pub fn to_float(&self) -> FloatVec2 {
         FloatVec2 {
             x: self.x.to_num(),
@@ -28,8 +28,8 @@ pub struct FloatVec2 {
 }
 
 impl FloatVec2 {
-    pub fn to_fixed(&self) -> FixedFloatVec2 {
-        FixedFloatVec2 {
+    pub fn to_fixed(&self) -> FixedVec2 {
+        FixedVec2 {
             x: FixedPoint::from_num(self.x),
             y: FixedPoint::from_num(self.y),
         }

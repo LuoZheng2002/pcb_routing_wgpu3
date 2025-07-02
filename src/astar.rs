@@ -2,7 +2,7 @@ use std::{cell::RefCell, cmp::Reverse, collections::{BinaryHeap, HashMap, HashSe
 
 use ordered_float::NotNan;
 
-use crate::{binary_heap_item::BinaryHeapItem, hyperparameters::{ASTAR_STRIDE, TURN_PENALTY}, pad::PadShape, pcb_render_model::{PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::PrimShape, trace_path::{Direction, TraceAnchors, TracePath, TraceSegment}, vec2::{FixedPoint, FixedVec2, FloatVec2}};
+use crate::{binary_heap_item::BinaryHeapItem, hyperparameters::{ASTAR_STRIDE, TURN_PENALTY}, pad::PadShape, pcb_render_model::{PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::{CircleShape, PrimShape, RectangleShape}, trace_path::{Direction, TraceAnchors, TracePath, TraceSegment}, vec2::{FixedPoint, FixedVec2, FloatVec2}};
 
 
 
@@ -25,30 +25,39 @@ impl AStarModel{
             return border_shapes.clone();
         }
         let margin = 100.0; // margin around the border shapes
-        let top_rectangle = PrimShape::Rectangle { 
-            position: FloatVec2{x: 0.0, y: self.height / 2.0 + margin/2.0}, 
-            width: self.width + 2.0 * margin, 
-            height: margin, 
-            rotation: cgmath::Deg(0.0)
-        };
-        let bottom_rectangle = PrimShape::Rectangle { 
-            position: FloatVec2{x: 0.0, y: -self.height / 2.0 - margin/2.0}, 
-            width: self.width + 2.0 * margin, 
-            height: margin, 
-            rotation: cgmath::Deg(0.0)
-        };
-        let left_rectangle = PrimShape::Rectangle { 
-            position: FloatVec2{x: -self.width / 2.0 - margin/2.0, y: 0.0}, 
-            width: margin, 
-            height: self.height + 2.0 * margin, 
-            rotation: cgmath::Deg(0.0)
-        };
-        let right_rectangle = PrimShape::Rectangle { 
-            position: FloatVec2{x: self.width / 2.0 + margin/2.0, y: 0.0}, 
-            width: margin, 
-            height: self.height + 2.0 * margin, 
-            rotation: cgmath::Deg(0.0)
-        };
+
+        let top_rectangle = PrimShape::Rectangle(
+            RectangleShape {
+                position: FloatVec2 { x: 0.0, y: self.height / 2.0 + margin / 2.0 },
+                width: self.width + 2.0 * margin,
+                height: margin,
+                rotation: cgmath::Deg(0.0),
+            }
+        );
+        let bottom_rectangle = PrimShape::Rectangle(
+            RectangleShape {
+                position: FloatVec2 { x: 0.0, y: -self.height / 2.0 - margin / 2.0 },
+                width: self.width + 2.0 * margin,
+                height: margin,
+                rotation: cgmath::Deg(0.0),
+            }
+        );
+        let left_rectangle = PrimShape::Rectangle(
+            RectangleShape {
+                position: FloatVec2 { x: -self.width / 2.0 - margin / 2.0, y: 0.0 },
+                width: margin,
+                height: self.height + 2.0 * margin,
+                rotation: cgmath::Deg(0.0),
+            }
+        );
+        let right_rectangle = PrimShape::Rectangle(
+            RectangleShape {
+                position: FloatVec2 { x: self.width / 2.0 + margin / 2.0, y: 0.0 },
+                width: margin,
+                height: self.height + 2.0 * margin,
+                rotation: cgmath::Deg(0.0),
+            }
+        );
         let border_shapes = Rc::new(vec![top_rectangle, bottom_rectangle, left_rectangle, right_rectangle]);
         *self.border_cache.borrow_mut() = Some(border_shapes.clone());
         border_shapes
@@ -98,6 +107,8 @@ impl AStarModel{
             let frontier_vec: Vec<BinaryHeapItem<Reverse<NotNan<f64>>, Rc<AstarNode>>> = frontier.clone().drain().collect();
             let mut lowest_total_cost = f64::MAX;
             let mut highest_total_cost: f64 = 0.0;
+            
+            
             for item in frontier_vec.iter() {
                 if item.key.0.into_inner() < lowest_total_cost {
                     lowest_total_cost = item.key.0.into_inner();
@@ -112,6 +123,14 @@ impl AStarModel{
                 trace_shape_renderables: Vec::new(),
                 pad_shape_renderables: Vec::new(),
             };
+            // render border
+            let border_renderables = self.get_border_shapes().iter().map(|shape| {
+                ShapeRenderable {
+                    shape: shape.clone(),
+                    color: [1.0, 0.0, 1.0, 0.5], // magenta border
+                }
+            }).collect::<Vec<_>>();
+            render_model.trace_shape_renderables.push(RenderableBatch(border_renderables));
             for item in frontier_vec.iter() {
                 let BinaryHeapItem { key: total_cost, value: astar_node } = item;
                 let total_cost = total_cost.0.into_inner();
@@ -335,17 +354,21 @@ impl AstarNode{
             vec![RenderableBatch(renderables)]
         }else{
             let shape_renderable = ShapeRenderable {
-                shape: PrimShape::Circle {
-                    position: self.position.to_float(),
-                    diameter: width,
-                },
+                shape: PrimShape::Circle(
+                    CircleShape {
+                        position: self.position.to_float(),
+                        diameter: width,
+                    }
+                ),
                 color: opaque_color,
             };
             let shape_clearance_renderable = ShapeRenderable {
-                shape: PrimShape::Circle {
-                    position: self.position.to_float(),
-                    diameter: width + clearance * 2.0,
-                },
+                shape: PrimShape::Circle(
+                    CircleShape {
+                        position: self.position.to_float(),
+                        diameter: width + clearance * 2.0,
+                    }
+                ),
                 color: transparent_color,
             };
             vec![RenderableBatch(vec![shape_renderable, shape_clearance_renderable])]

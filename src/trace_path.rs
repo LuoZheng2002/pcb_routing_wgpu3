@@ -1,5 +1,5 @@
 use crate::{
-    pcb_render_model::{RenderableBatch, ShapeRenderable}, prim_shape::PrimShape, vec2::{FixedVec2, FloatVec2}
+    pcb_render_model::{RenderableBatch, ShapeRenderable}, prim_shape::{CircleShape, PrimShape, RectangleShape}, vec2::{FixedVec2, FloatVec2}
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, PartialOrd, Ord)]
@@ -98,24 +98,30 @@ impl TraceSegment {
         // a trace segment is composed of two circles and a rectangle
         let start = self.start.to_float();
         let end = self.end.to_float();
-        let start_circle = PrimShape::Circle {
-            position: start,
-            diameter: self.width,
-        };
-        let end_circle = PrimShape::Circle {
-            position: end,
-            diameter: self.width,
-        };
         let segment_length = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
-        let segment_rect = PrimShape::Rectangle {
-            position: FloatVec2 {
-                x: (start.x + end.x) / 2.0,
-                y: (start.y + end.y) / 2.0,
-            },
-            width: segment_length,
-            height: self.width,
-            rotation: cgmath::Deg(self.direction.to_degree_angle()),
-        };
+        let start_circle = PrimShape::Circle(
+            CircleShape {
+                position: start,
+                diameter: self.width,
+            }
+        );
+        let end_circle = PrimShape::Circle(
+            CircleShape {
+                position: end,
+                diameter: self.width,
+            }
+        );
+        let segment_rect = PrimShape::Rectangle(
+            RectangleShape {
+                position: FloatVec2 {
+                    x: (start.x + end.x) / 2.0,
+                    y: (start.y + end.y) / 2.0,
+                },
+                width: segment_length,
+                height: self.width,
+                rotation: cgmath::Deg(self.direction.to_degree_angle()),
+            }
+        );
         vec![start_circle, end_circle, segment_rect]
     }
     pub fn to_clearance_shapes(&self) -> Vec<PrimShape> {
@@ -125,23 +131,29 @@ impl TraceSegment {
         let segment_length = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
         let new_width = self.width + self.clearance * 2.0;
         let new_diameter = new_width;
-        let clearance_start_circle = PrimShape::Circle {
-            position: start,
-            diameter: new_diameter,
-        };
-        let clearance_end_circle = PrimShape::Circle {
-            position: end,
-            diameter: new_diameter,
-        };
-        let clearance_rect = PrimShape::Rectangle {
-            position: FloatVec2 {
-                x: (start.x + end.x) / 2.0,
-                y: (start.y + end.y) / 2.0,
-            },
-            width: segment_length,
-            height: new_width,
-            rotation: cgmath::Deg(self.direction.to_degree_angle()),
-        };
+        let clearance_start_circle = PrimShape::Circle(
+            CircleShape {
+                position: start,
+                diameter: new_diameter,
+            }
+        );
+        let clearance_end_circle = PrimShape::Circle(
+            CircleShape {
+                position: end,
+                diameter: new_diameter,
+            }
+        );
+        let clearance_rect = PrimShape::Rectangle(
+            RectangleShape {
+                position: FloatVec2 {
+                    x: (start.x + end.x) / 2.0,
+                    y: (start.y + end.y) / 2.0,
+                },
+                width: segment_length + self.clearance * 2.0,
+                height: new_width,
+                rotation: cgmath::Deg(self.direction.to_degree_angle()),
+            }
+        );
         vec![clearance_start_circle, clearance_end_circle, clearance_rect]
     }
     pub fn collides_with(&self, other: &TraceSegment) -> bool {
