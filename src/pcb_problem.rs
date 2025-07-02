@@ -13,7 +13,7 @@ use ordered_float::NotNan;
 use rand::distr::{weighted::WeightedIndex, Distribution};
 
 use crate::{
-    astar::AStarModel, hyperparameters::{CONSTANT_LEARNING_RATE, ITERATION_TO_NUM_TRACES, ITERATION_TO_PRIOR_PROBABILITY, LINEAR_LEARNING_RATE, MAX_GENERATION_ATTEMPTS, NEXT_ITERATION_TO_REMAINING_PROBABILITY, OPPORTUNITY_COST_WEIGHT, SCORE_WEIGHT}, pad::Pad, pcb_render_model::{PcbRenderModel, UpdatePcbRenderModel}, prim_shape::PrimShape, trace_path::{TraceAnchors, TracePath}, vec2::{FixedPoint, FixedVec2}
+    astar::AStarModel, binary_heap_item::BinaryHeapItem, hyperparameters::{CONSTANT_LEARNING_RATE, ITERATION_TO_NUM_TRACES, ITERATION_TO_PRIOR_PROBABILITY, LINEAR_LEARNING_RATE, MAX_GENERATION_ATTEMPTS, NEXT_ITERATION_TO_REMAINING_PROBABILITY, OPPORTUNITY_COST_WEIGHT, SCORE_WEIGHT}, pad::Pad, pcb_render_model::{self, PcbRenderModel, UpdatePcbRenderModel}, prim_shape::PrimShape, trace_path::{TraceAnchors, TracePath}, vec2::{FixedPoint, FixedVec2}
 };
 
 // use shared::interface_types::{Color, ColorGrid};
@@ -226,7 +226,7 @@ impl ProbaModel {
         problem: &PcbProblem,
         fixed_traces: &HashMap<ConnectionID, FixedTrace>,
         pcb_render_model: Arc<Mutex<PcbRenderModel>>,
-    ) -> Result<Self, String> {
+    ) -> Self {
         let mut connection_ids: Vec<ConnectionID> = Vec::new();
         for net_info in problem.nets.values() {
             for connection in net_info.connections.keys() {
@@ -262,19 +262,19 @@ impl ProbaModel {
         // sample and then update posterior
         for j in 0..4{
             println!("Sampling new traces for iteration {}", j + 1);
-            proba_model.sample_new_traces(problem)?;
+            proba_model.sample_new_traces(problem);
             display_and_block(&proba_model);
 
             for i in 0..10{
                 println!("Updating posterior for the {}th time", i + 1);
-                proba_model.update_posterior()?;
+                proba_model.update_posterior();
                 display_and_block(&proba_model);
             }
         }
-        Ok(proba_model)
+        proba_model
     }
 
-    fn sample_new_traces(&mut self, problem: &PcbProblem) -> Result<(), String> {
+    fn sample_new_traces(&mut self, problem: &PcbProblem) {
         let mut new_proba_traces: Vec<Rc<ProbaTrace>> = Vec::new();
 
         // connection_id to connection
@@ -622,7 +622,6 @@ impl ProbaModel {
         self.collision_adjacency = collision_adjacency;
         // update next_iteration
         self.next_iteration = NonZeroUsize::new(self.next_iteration.get() + 1).unwrap();
-        Ok(())
     }
     pub fn to_pcb_render_model(&self, problem: &PcbProblem) -> PcbRenderModel {
         let mut pcb_render_model = PcbRenderModel {
@@ -634,7 +633,7 @@ impl ProbaModel {
         todo!("Convert ProbaModel to PcbRenderModel");
     }
 
-    pub fn update_posterior(&mut self)->Result<(), String>{
+    pub fn update_posterior(&mut self){
         let proba_traces: HashMap<ProbaTraceID, Rc<ProbaTrace>> = self.connection_to_traces
             .values()
             .filter_map(|traces| {
@@ -704,22 +703,24 @@ impl ProbaModel {
             // reset temp_posterior
             *temp_posterior = None;
         }
-        Ok(())
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Node {
-    pub remaining_trace_candidates: BinaryHeap<(NotNan<f64>, ProbaTraceID)>, // The remaining trace candidates to be processed, sorted by their scores)>
+    pub remaining_trace_candidates: BinaryHeap<BinaryHeapItem<NotNan<f64>, Rc<ProbaTrace>>>, // The remaining trace candidates to be processed, sorted by their scores)>
     pub fixed_traces: HashMap<ConnectionID, FixedTrace>,
     pub prob_up_to_date: bool, // Whether the probabilistic model is up to date
 }
 
+
+
 impl Node{
-    pub fn from_proba_model(
+    fn from_proba_model(
         proba_model: &ProbaModel,
     )->Self{
         let mut fixed_traces: HashMap<ConnectionID, FixedTrace> = HashMap::new();
-        let mut remaining_trace_candidates: BinaryHeap<(NotNan<f64>, ProbaTraceID)> = BinaryHeap::new();
+        let mut remaining_trace_candidates: BinaryHeap<BinaryHeapItem<NotNan<f64>, Rc<ProbaTrace>>> = BinaryHeap::new();
         for (connection_id, traces) in proba_model.connection_to_traces.iter() {
             match traces {
                 Traces::Fixed(fixed_trace) => {
@@ -729,7 +730,10 @@ impl Node{
                     for (proba_trace_id, proba_trace) in trace_map.iter() {
                         let posterior = proba_trace.get_posterior_with_fallback();
                         let not_nan_proba = NotNan::new(posterior).expect("Probability must be non-NaN");
-                        remaining_trace_candidates.push((not_nan_proba, *proba_trace_id));
+                        remaining_trace_candidates.push(BinaryHeapItem{
+                            key: not_nan_proba,
+                            value: proba_trace.clone(),
+                        });
                     }
                 }
             }
@@ -740,14 +744,110 @@ impl Node{
             prob_up_to_date: true, // Initially, the probabilistic model is up to date
         }
     }
-    /// If an attemp fails, return error; it will pop the priority queue in both scenarios
-    pub fn try_fix_a_trace(&mut self)->Result<Self, String>{
+    fn fix_trace(&mut self, connection_id: ConnectionID, fixed_trace: FixedTrace) {
+        // Add the fixed trace to the fixed traces
+        self.fixed_traces.insert(connection_id, fixed_trace);
+        // Remove all trace candidates for this connection from the remaining candidates
+        let mut remaining_trace_candidates_copy = self.remaining_trace_candidates.clone();
+        let mut new_remaining_trace_candidates: BinaryHeap<BinaryHeapItem<NotNan<f64>, Rc<ProbaTrace>>> = BinaryHeap::new();
+        for candidate in remaining_trace_candidates_copy.drain() {
+            if candidate.value.connection_id != connection_id {
+                new_remaining_trace_candidates.push(candidate);
+            }
+        }
+        self.remaining_trace_candidates = new_remaining_trace_candidates;
+        // Mark the probabilistic model as no longer up to date
+        self.prob_up_to_date = false;
+    }
+    /// If an attemp fails, return none; it will pop the priority queue in both scenarios
+    /// assume there are still candidates in the priority queue
+    pub fn try_fix_top_ranked_trace(&mut self)->Option<Self>{
         // for self, peek from the priority queue
         // if succeed, remove all traces from the same connection, and generate a new node with the same priority queue and a fixed trace
         // if fail, return error
-        
-
-        todo!()
+        let top_ranked_candidate = self.remaining_trace_candidates.pop()
+            .expect("No remaining trace candidates to fix");
+        let top_ranked_trace_path = &top_ranked_candidate.value.trace_path;
+        // check if the trace collides with any fixed trace
+        for fixed_trace in self.fixed_traces.values() {
+            if top_ranked_trace_path.collides_with(&fixed_trace.trace_path) {
+                // If it collides, we cannot fix this trace
+                println!("Top ranked trace collides with a fixed trace, cannot fix it");
+                return None; // Return None to indicate failure
+            }
+        }
+        // If it does not collide, we can fix this trace
+        let connection_id = top_ranked_candidate.value.connection_id;
+        // Create a new fixed trace
+        let fixed_trace = FixedTrace {
+            net_id: top_ranked_candidate.value.net_id,
+            connection_id,
+            trace_path: top_ranked_trace_path.clone(),
+        };
+        // delete all trace candidates for this connection in the new node
+        let mut new_node = self.clone();
+        new_node.fix_trace(connection_id, fixed_trace);
+        Some(new_node) // Return the new node with the fixed trace
+    }
+    pub fn from_fixed_traces(
+        problem: &PcbProblem,
+        fixed_traces: &HashMap<ConnectionID, FixedTrace>,
+        pcb_render_model: Arc<Mutex<PcbRenderModel>>,
+    )->Self{
+        let proba_model = ProbaModel::create_and_solve(problem, fixed_traces, pcb_render_model);
+        Node::from_proba_model(&proba_model)
+    }
+    /// if self is already up to date, return none
+    pub fn try_update_proba_model(&self, problem: &PcbProblem, pcb_render_model: Arc<Mutex<PcbRenderModel>>) -> Option<Self>{
+        if self.prob_up_to_date {
+            return None; // If the probabilistic model is already up to date, do nothing
+        }
+        let fixed_traces = &self.fixed_traces;
+        let new_node = Node::from_fixed_traces(problem, fixed_traces, pcb_render_model);
+        Some(new_node) // Return the new node with the updated probabilistic model
+    }
+    pub fn is_solution(&self, problem: &PcbProblem) -> bool {
+        // Check if all connections in the problem have fixed traces in this node
+        for net_info in problem.nets.values() {
+            for connection_id in net_info.connections.keys() {
+                if !self.fixed_traces.contains_key(connection_id) {
+                    return false; // If any connection does not have a fixed trace, it's not a solution
+                }
+            }
+        }
+        true // All connections have fixed traces, so this is a solution
+    }
+    pub fn try_fix_any_trace(&mut self) -> Option<Self> {
+        // Try to fix any trace from the remaining candidates
+        while self.remaining_trace_candidates.len() > 0 {
+            let top_ranked_candidate = self.remaining_trace_candidates.pop()
+                .expect("No remaining trace candidates to fix");
+            let top_ranked_trace_path = &top_ranked_candidate.value.trace_path;
+            // Check if the trace collides with any fixed trace
+            let mut collision_found = false;
+            for fixed_trace in self.fixed_traces.values() {
+                if top_ranked_trace_path.collides_with(&fixed_trace.trace_path) {
+                    // If it collides, we cannot fix this trace
+                    println!("Top ranked trace collides with a fixed trace, cannot fix it");
+                    collision_found = true;
+                    break; // No need to check further, we found a collision
+                }
+            }
+            if !collision_found{
+                // If it does not collide, we can fix this trace
+                let connection_id = top_ranked_candidate.value.connection_id;
+                // Create a new fixed trace
+                let fixed_trace = FixedTrace {
+                    net_id: top_ranked_candidate.value.net_id,
+                    connection_id,
+                    trace_path: top_ranked_trace_path.clone(),
+                };
+                let mut new_node = self.clone();
+                new_node.fix_trace(connection_id, fixed_trace);
+                return Some(new_node); // Return the new node with the fixed trace
+            }
+        }
+        None
     }
 }
 
@@ -804,15 +904,80 @@ impl PcbProblem {
     }
 
     pub fn solve(&self, pcb_render_model: Arc<Mutex<PcbRenderModel>>) -> Result<PcbSolution, String> {
-        let node_stack: Vec<Node> = Vec::new();
-        let first_proba_model = ProbaModel::create_and_solve(
-            self, 
-            &HashMap::new(), // No fixed traces for the initial problem
-            pcb_render_model
-        )?;
+        let mut node_stack: Vec<Node> = Vec::new();
 
+        fn last_updated_node_index(node_stack: &Vec<Node>) -> usize {
+            for (index, node) in node_stack.iter().enumerate().rev() {
+                if node.prob_up_to_date {
+                    return index; // Return the index of the last updated node
+                }
+            }
+            // because the first node is always up to date, it is impossible to reach here
+            panic!("No updated node found in the stack");
+        }
+
+        fn print_current_stack(node_stack: &Vec<Node>) {
+            println!("Current stack:");
+            for (index, node) in node_stack.iter().enumerate() {
+                println!("\tNode {}: up_to_date: {}, num fixed traces: {}, num remaining trace candidates: {}, ", 
+                    index,
+                    node.prob_up_to_date,
+                    node.fixed_traces.len(),
+                    node.remaining_trace_candidates.len()
+                );
+            }
+        }
         
-        todo!()
+        let first_node = Node::from_fixed_traces(self, &HashMap::new(), pcb_render_model.clone());
+        // assume the first node has trace candidates
+        node_stack.push(first_node);
+
+        while node_stack.len() > 0 {
+            print_current_stack(&node_stack);
+            let top_node = node_stack.last_mut().unwrap();
+            if top_node.is_solution(self){
+                println!("Found a solution!");
+                // If the top node is a solution, we can return it
+                let fixed_traces = top_node.fixed_traces.clone();
+                let solution = PcbSolution {
+                    determined_traces: fixed_traces,
+                };
+                return Ok(solution);
+            }
+            let new_node = top_node.try_fix_top_ranked_trace();
+            match new_node{
+                Some(new_node) => {
+                    // If we successfully fixed a trace, push the new node onto the stack
+                    println!("Successfully fixed the top ranked trace, pushing new node onto the stack");
+                    assert!(new_node.prob_up_to_date, "New node must be up to date");
+                    node_stack.push(new_node);
+                }
+                None => {
+                    // If we failed to fix the top-ranked trace, we update the node in the middle between the current position and the last updated node
+                    println!("Failed to fix the top ranked trace, trying to update the probabilistic model in the middle of the stack");
+                    let current_node_index = node_stack.len() - 1;
+                    let last_updated_index = last_updated_node_index(&node_stack);
+                    let target_index = (current_node_index + last_updated_index + 1) / 2; // bias to right for consistency
+                    let new_node = node_stack[target_index].try_update_proba_model(self, pcb_render_model.clone());
+                    match new_node {
+                        Some(new_node) => {
+                            // If we successfully updated the probabilistic model, replace the node at the target index with the new node
+                            assert!(target_index < node_stack.len() - 1, "target index cannot be the last node in the stack");
+                            node_stack[target_index + 1] = new_node;
+                            node_stack.truncate(target_index + 2); // Remove all nodes above the target index
+                            println!("Successfully updated the probabilistic model, replacing node at index {}", target_index);
+                        },
+                        None => {
+                            // If we failed to update the probabilistic model, we pop the current node from the stack
+                            assert!(target_index == node_stack.len() - 1, "target index must be the last node in the stack");
+                            node_stack.pop();
+                            println!("Failed to update the probabilistic model, popping the current node from the stack");
+                        }
+                    }
+                }
+            }
+        }
+        Err("No solution found".to_string())
     }
 
     pub fn collides_with_border(&self) -> bool {

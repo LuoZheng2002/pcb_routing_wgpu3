@@ -18,3 +18,4 @@ pub mod transparent_pipeline;
 pub mod vec2;
 pub mod vertex;
 pub mod astar;
+pub mod binary_heap_item;
