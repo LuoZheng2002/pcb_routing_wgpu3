@@ -193,11 +193,9 @@ pub fn pcb_render_model_to_transparent_shape_submissions(
         }      
         let mut batch_contents = Vec::new();
         if !circle_instances.is_empty() {
-            println!("Circle instance number: {}", circle_instances.len());
             batch_contents.push((circle_mesh.clone(), circle_instances));
         }
         if !rect_instances.is_empty() {
-            println!("Rectangle instance number: {}", rect_instances.len());
             batch_contents.push((rect_mesh.clone(), rect_instances));
         }  
         if !batch_contents.is_empty() {

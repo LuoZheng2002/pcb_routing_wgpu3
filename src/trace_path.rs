@@ -225,16 +225,22 @@ impl TracePath {
         1.0
     }
 
-    pub fn to_renderables(&self, color: [f32; 4]) -> RenderableBatch{
+    pub fn to_renderables(&self, color: [f32; 4]) -> [RenderableBatch; 2]{
         let mut renderables = Vec::new();
-        let clearance_color = [color[0], color[1], color[2], color[3]/2.0]; // semi-transparent color
         // Render the segments
         for segment in &self.segments {
             let segment_renderables = segment.to_renderables(color);
-            let segment_clearance_renderables = segment.to_clearance_renderables(clearance_color); // semi-transparent color
             renderables.extend(segment_renderables);
-            renderables.extend(segment_clearance_renderables);
         }
-        RenderableBatch(renderables)
+        let mut clearance_renderables = Vec::new();
+        let clearance_color = [color[0], color[1], color[2], color[3]/2.0]; // semi-transparent color
+        for segment in &self.segments {
+            let segment_clearance_renderables = segment.to_clearance_renderables(clearance_color); // semi-transparent color
+            clearance_renderables.extend(segment_clearance_renderables);
+        }
+        [
+            RenderableBatch(renderables),
+            RenderableBatch(clearance_renderables),
+        ]
     }
 }

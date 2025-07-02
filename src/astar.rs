@@ -145,8 +145,8 @@ impl AStarModel{
                 } else {
                     1.0 // if all costs are the same, use full opacity
                 };
-                let alpha = alpha as f32;
-                assert!(alpha >= 0.0 && alpha <= 1.0, "Alpha should be between 0.0 and 1.0");
+                let alpha = alpha.clamp(0.0, 1.0) as f32;
+                assert!(alpha >= 0.0 && alpha <= 1.0, "Alpha should be between 0.0 and 1.0, get: {}", alpha);
                 let color: [f32; 3] = [1.0-alpha, alpha, 0.0]; // red to green gradient
                 let renderables = astar_node.to_renderables(self.trace_width, self.trace_clearance, color);
                 render_model.trace_shape_renderables.extend(renderables);
@@ -245,51 +245,76 @@ impl AStarModel{
                 if final_length == FixedPoint::from_num(0.0) {
                     continue; // no valid movement in this direction
                 }
-                // secured the position of the new node                
-                let new_position = get_new_position(final_length);
-                let astar_node_key = AstarNodeKey {
-                    position: new_position,
-                    direction: Some(direction),
-                };
-                // check if the new position is already visited
-                if visited.contains(&astar_node_key) {
-                    continue; // already visited this position with this direction
-                }
 
-                // calculate the cost to reach the next node
-                let turn_penalty = if let Some(prev_direction) = current_node.direction {
-                    if prev_direction == direction {
-                        0.0 // no turn penalty if the direction is the same
-                    } else {
-                        TURN_PENALTY
+                // secured the position of the new node         
+                // first push this node to the frontier, then we also have to consider a midway related to the goal 
+                let mut try_push_node_to_frontier = |length: FixedPoint|{
+                    let new_position = get_new_position(length);
+                    let astar_node_key = AstarNodeKey {
+                        position: new_position,
+                        direction: Some(direction),
+                    };
+                    // check if the new position is already visited
+                    if visited.contains(&astar_node_key) {
+                        return;
                     }
-                } else {
-                    0.0 // no turn penalty for the start node
+
+                    // calculate the cost to reach the next node
+                    let turn_penalty = if let Some(prev_direction) = current_node.direction {
+                        if prev_direction == direction {
+                            0.0 // no turn penalty if the direction is the same
+                        } else {
+                            TURN_PENALTY
+                        }
+                    } else {
+                        0.0 // no turn penalty for the start node
+                    };
+                    let length: f64 = (direction.to_fixed_vec2().length() * final_length).to_num();
+                    let actual_cost = current_node.actual_cost + length + turn_penalty;
+                    let actual_length = current_node.actual_length + length;
+                    let estimated_cost = octile_distance(&new_position, &self.end);
+                    let total_cost = actual_cost + estimated_cost;                
+                    let new_node = AstarNode {
+                        position: new_position,
+                        direction: Some(direction),
+                        actual_cost,
+                        actual_length,
+                        estimated_cost,
+                        total_cost,
+                        prev_node: Some(current_node.clone()), // link to the previous node
+                    };
+                    // push directly to the frontier
+                    println!("Pushed a node with position: {:?}, direction: {:?}, total_cost: {}", 
+                        new_node.position, 
+                        new_node.direction, 
+                        new_node.total_cost
+                    );
+                    frontier.push(BinaryHeapItem {
+                        key: Reverse(NotNan::new(new_node.total_cost).unwrap()), // use Reverse to make it a min heap
+                        value: Rc::new(new_node),
+                    });
+                };   
+                try_push_node_to_frontier(final_length); // push the node with the final length
+                let old_x = current_node.position.x;
+                let old_y = current_node.position.y;
+                let new_x = old_x + direction_vec2.x * final_length;
+                let new_y = old_y + direction_vec2.y * final_length;
+                let (x_min, x_max) = (old_x.min(new_x), old_x.max(new_x));
+                let (y_min, y_max) = (old_y.min(new_y), old_y.max(new_y));
+                let midway_length: Option<FixedPoint> = if self.end.x > x_min && self.end.y <x_max{
+                    Some((self.end.x - old_x).abs())
+                }else if self.end.y > y_min && self.end.y < y_max{
+                    Some((self.end.y - old_y).abs())
+                }else{
+                    None // no midway length, the end point is not in the range of the current segment
                 };
-                let length: f64 = (direction.to_fixed_vec2().length() * final_length).to_num();
-                let actual_cost = current_node.actual_cost + length + turn_penalty;
-                let actual_length = current_node.actual_length + length;
-                let estimated_cost = octile_distance(&new_position, &self.end);
-                let total_cost = actual_cost + estimated_cost;                
-                let new_node = AstarNode {
-                    position: new_position,
-                    direction: Some(direction),
-                    actual_cost,
-                    actual_length,
-                    estimated_cost,
-                    total_cost,
-                    prev_node: Some(current_node.clone()), // link to the previous node
-                };
-                // push directly to the frontier
-                println!("Pushed a node with position: {:?}, direction: {:?}, total_cost: {}", 
-                    new_node.position, 
-                    new_node.direction, 
-                    new_node.total_cost
-                );
-                frontier.push(BinaryHeapItem {
-                    key: Reverse(NotNan::new(new_node.total_cost).unwrap()), // use Reverse to make it a min heap
-                    value: Rc::new(new_node),
-                });
+                // try midway length
+                if let Some(midway_length) = midway_length {
+                    assert!(midway_length > FixedPoint::from_num(0.0), "Midway length should be greater than 0.0");
+                    assert!(midway_length < final_length, "Midway length should be less than or equal to the final length");
+                    // push the midway node to the frontier
+                    try_push_node_to_frontier(midway_length);
+                }
                 display_and_block(&frontier); // display the current state of the frontier
             }
         }
@@ -363,10 +388,9 @@ impl AstarNode{
                 width,
                 clearance,
             };
-            let mut renderables = trace_segment.to_renderables(opaque_color);
-            renderables.extend(trace_segment.to_clearance_renderables(transparent_color));
-            println!("number of renderables in a segment: {}", renderables.len());
-            vec![RenderableBatch(renderables)]
+            let renderables = trace_segment.to_renderables(opaque_color);
+            let clearance_renderables = trace_segment.to_clearance_renderables(transparent_color);
+            vec![RenderableBatch(renderables), RenderableBatch(clearance_renderables)]
         }else{
             let shape_renderable = ShapeRenderable {
                 shape: PrimShape::Circle(

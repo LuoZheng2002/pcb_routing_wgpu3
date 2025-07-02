@@ -648,8 +648,8 @@ impl ProbaModel {
                 // Add fixed traces
                 if let Some(Traces::Fixed(fixed_trace)) = self.connection_to_traces.get(&connection.connection_id) {
                     let color = net_info.color.to_float4(1.0);
-                    let renderable_batch = fixed_trace.trace_path.to_renderables(color);
-                    trace_shape_renderables.push(renderable_batch);
+                    let renderable_batches = fixed_trace.trace_path.to_renderables(color);
+                    trace_shape_renderables.extend(renderable_batches);
                 }
                 // Add probabilistic traces
                 if let Some(Traces::Probabilistic(trace_map)) = self.connection_to_traces.get(&connection.connection_id) {
@@ -657,8 +657,8 @@ impl ProbaModel {
                         let posterior = proba_trace.get_posterior_with_fallback();
                         let posterior = posterior.clamp(0.0, 1.0); // Ensure posterior is between 0 and 1
                         let color = net_info.color.to_float4(posterior as f32);
-                        let renderable_batch = proba_trace.trace_path.to_renderables(color);
-                        trace_shape_renderables.push(renderable_batch);
+                        let renderable_batches = proba_trace.trace_path.to_renderables(color);
+                        trace_shape_renderables.extend(renderable_batches);
                     }
                 }
                 // Add pads

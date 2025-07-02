@@ -83,7 +83,7 @@ impl TransparentPipeline {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: MyTexture::DEPTH_FORMAT,
                 depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual, // 1.
+                depth_compare: wgpu::CompareFunction::Less, // 1.
                 stencil: wgpu::StencilState::default(),          // 2.
                 bias: wgpu::DepthBiasState::default(),
             }), // 1.
