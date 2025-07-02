@@ -2,7 +2,7 @@ use std::{cell::RefCell, cmp::Reverse, collections::{BinaryHeap, HashSet}, rc::R
 
 use ordered_float::NotNan;
 
-use crate::{binary_heap_item::BinaryHeapItem, hyperparameters::{ASTAR_STRIDE, TURN_PENALTY}, pcb_render_model::{PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::{CircleShape, PrimShape, RectangleShape}, trace_path::{Direction, TraceAnchors, TracePath, TraceSegment}, vec2::{FixedPoint, FixedVec2, FloatVec2}};
+use crate::{binary_heap_item::BinaryHeapItem, block_or_sleep::{block_or_sleep, block_thread}, hyperparameters::{ASTAR_STRIDE, ESTIMATE_COEFFICIENT, TURN_PENALTY}, pcb_render_model::{PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::{CircleShape, PrimShape, RectangleShape}, trace_path::{Direction, TraceAnchors, TracePath, TraceSegment}, vec2::{FixedPoint, FixedVec2, FloatVec2}};
 
 
 
@@ -85,7 +85,7 @@ impl AStarModel{
             let dy = (end.y - start.y).abs() as f64;
             f64::max(dx, dy) + (f64::sqrt(2.0) - 1.0) * f64::min(dx, dy)
         }
-        let start_estimated_cost = octile_distance(&self.start, &self.end);
+        let start_estimated_cost = octile_distance(&self.start, &self.end) * ESTIMATE_COEFFICIENT;
         let start_node = AstarNode {
             position: self.start,
             direction: None, // no direction for the start node
@@ -110,6 +110,8 @@ impl AStarModel{
             let mut highest_total_cost: f64 = 0.0;
             
             
+
+
             for item in frontier_vec.iter() {
                 if item.key.0.into_inner() < lowest_total_cost {
                     lowest_total_cost = item.key.0.into_inner();
@@ -124,6 +126,21 @@ impl AStarModel{
                 trace_shape_renderables: Vec::new(),
                 pad_shape_renderables: Vec::new(),
             };
+
+            let obstacle_renderables = self.obstacle_shapes.iter().map(|shape| {
+                ShapeRenderable {
+                    shape: shape.clone(),
+                    color: [0.7, 0.7, 0.7, 1.0], // gray obstacles
+                }
+            }).collect::<Vec<_>>();
+            render_model.trace_shape_renderables.push(RenderableBatch(obstacle_renderables));
+            let obstacle_clearance_renderables = self.obstacle_clearance_shapes.iter().map(|shape| {
+                ShapeRenderable {
+                    shape: shape.clone(),
+                    color: [0.7, 0.7, 0.7, 0.5], // gray obstacle clearance
+                }
+            }).collect::<Vec<_>>();
+            render_model.trace_shape_renderables.push(RenderableBatch(obstacle_clearance_renderables));
             // render border
             let border_renderables = self.get_border_shapes().iter().map(|shape| {
                 ShapeRenderable {
@@ -169,13 +186,21 @@ impl AStarModel{
             render_model.pad_shape_renderables.push(start_renderable);
             render_model.pad_shape_renderables.push(end_renderable);
             pcb_render_model.update_pcb_render_model(render_model);
-            println!("Press Enter to continue...");
-            let mut input = String::new();
-            let _ = std::io::stdin().read_line(&mut input).unwrap();
+            block_or_sleep();
         };
+        display_and_block(&frontier); // display the initial state of the frontier
+        let max_trials: usize = 200;
+        let mut trial_count = 0;
         while !frontier.is_empty(){
-            let BinaryHeapItem { key: _, value: current_node } = frontier.pop().unwrap();
+            trial_count += 1;
+            if trial_count > max_trials {
+                return Err("A* search exceeded maximum trials".to_string());
+            }
+            let item = frontier.pop().unwrap();
+            let current_node = item.value.clone();
             if current_node.position == self.end {
+                frontier.push(item); // push the current node back to the frontier, so that it can be displayed
+                display_and_block(&frontier); // display the current state of the frontier
                 // Reached the end node, construct the trace path
                 let trace_path = current_node.to_trace_path(self.trace_width, self.trace_clearance);
                 return Ok(AStarResult { trace_path });
@@ -240,9 +265,10 @@ impl AStarModel{
                             }
                         }
                     }
+                    println!("No collision");
                     false // no collision
                 };
-                let final_length = if check_collision(*ASTAR_STRIDE){
+                let final_length = if !check_collision(*ASTAR_STRIDE){
                     *ASTAR_STRIDE
                 }else{
                     let mut lower_bound = FixedPoint::from_num(0.0);
@@ -289,7 +315,7 @@ impl AStarModel{
                     let length: f64 = (direction.to_fixed_vec2().length() * final_length).to_num();
                     let actual_cost = current_node.actual_cost + length + turn_penalty;
                     let actual_length = current_node.actual_length + length;
-                    let estimated_cost = octile_distance(&new_position, &self.end);
+                    let estimated_cost = octile_distance(&new_position, &self.end) * ESTIMATE_COEFFICIENT;
                     let total_cost = actual_cost + estimated_cost;                
                     let new_node = AstarNode {
                         position: new_position,

@@ -8,10 +8,10 @@ use std::{
 };
 
 use ordered_float::NotNan;
-use rand::distr::{weighted::WeightedIndex, Distribution};
+use rand::{distr::{weighted::WeightedIndex, Distribution}, rand_core::block};
 
 use crate::{
-    astar::AStarModel, binary_heap_item::BinaryHeapItem, hyperparameters::{CONSTANT_LEARNING_RATE, ITERATION_TO_NUM_TRACES, ITERATION_TO_PRIOR_PROBABILITY, LINEAR_LEARNING_RATE, MAX_GENERATION_ATTEMPTS, NEXT_ITERATION_TO_REMAINING_PROBABILITY, OPPORTUNITY_COST_WEIGHT, SCORE_WEIGHT}, pad::Pad, pcb_render_model::{PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::PrimShape, trace_path::{TraceAnchors, TracePath}, vec2::FixedVec2
+    astar::AStarModel, binary_heap_item::BinaryHeapItem, block_or_sleep::{block_or_sleep, block_thread}, hyperparameters::{CONSTANT_LEARNING_RATE, ITERATION_TO_NUM_TRACES, ITERATION_TO_PRIOR_PROBABILITY, LINEAR_LEARNING_RATE, MAX_GENERATION_ATTEMPTS, NEXT_ITERATION_TO_REMAINING_PROBABILITY, OPPORTUNITY_COST_WEIGHT, SCORE_WEIGHT}, pad::Pad, pcb_render_model::{PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::PrimShape, trace_path::{TraceAnchors, TracePath}, vec2::FixedVec2
 };
 
 // use shared::interface_types::{Color, ColorGrid};
@@ -263,24 +263,24 @@ impl ProbaModel {
         let display_and_block = |proba_model: &ProbaModel|{
             let render_model = proba_model.to_pcb_render_model(problem);
             pcb_render_model.update_pcb_render_model(render_model);
-            println!("Press Enter to continue...");
-            let mut input = String::new();
-            let _ = std::io::stdin().read_line(&mut input).unwrap();
+            block_or_sleep();
         };
         display_and_block(&proba_model);
-        
+        block_thread();
 
         // sample and then update posterior
         for j in 0..4{
             println!("Sampling new traces for iteration {}", j + 1);
             proba_model.sample_new_traces(problem, pcb_render_model.clone());
             display_and_block(&proba_model);
+            block_thread();
 
             for i in 0..10{
                 println!("Updating posterior for the {}th time", i + 1);
                 proba_model.update_posterior();
                 display_and_block(&proba_model);
             }
+            block_thread();
         }
         proba_model
     }
@@ -663,9 +663,9 @@ impl ProbaModel {
                 }
                 // Add pads
                 let source_renderables = connection.source.to_renderables(net_info.color.to_float4(1.0));
-                let source_clearance_renderables = connection.source.to_clearance_renderables(net_info.color.to_float4(1.0));
+                let source_clearance_renderables = connection.source.to_clearance_renderables(net_info.color.to_float4(0.5));
                 let sink_renderables = connection.sink.to_renderables(net_info.color.to_float4(1.0));
-                let sink_clearance_renderables = connection.sink.to_clearance_renderables(net_info.color.to_float4(1.0));
+                let sink_clearance_renderables = connection.sink.to_clearance_renderables(net_info.color.to_float4(0.5));
                 pad_shape_renderables.extend(source_renderables);
                 pad_shape_renderables.extend(source_clearance_renderables);
                 pad_shape_renderables.extend(sink_renderables);
