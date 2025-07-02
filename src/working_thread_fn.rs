@@ -29,7 +29,9 @@ pub fn working_thread_fn(pcb_render_model: Arc<Mutex<PcbRenderModel>>){
             },
             rotation: Deg(15.0),
             clearance: 0.3,
-        }
+        },
+        0.8,
+        0.2,
     );
     let result = pcb_problem.solve(pcb_render_model.clone());
     match result {

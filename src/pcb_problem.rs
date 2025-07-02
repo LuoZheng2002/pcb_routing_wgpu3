@@ -42,6 +42,8 @@ pub struct Connection {
     pub connection_id: ConnectionID, // Unique identifier for the connection
     pub source: Pad,
     pub sink: Pad,
+    pub trace_width: f32, // Width of the trace
+    pub trace_clearance: f32, // Clearance around the trace
     // pub traces: HashMap<TraceID, TraceInfo>, // List of traces connecting the source and sink pads
 }
 
@@ -506,6 +508,9 @@ impl ProbaModel {
                     // sample a trace for this connection
                     astar_model.start = connection.source.position.to_fixed();
                     astar_model.end = connection.sink.position.to_fixed();
+                    astar_model.trace_width = connection.trace_width;
+                    astar_model.trace_clearance = connection.trace_clearance;
+
                     // run A* algorithm to find a path
                     let astar_result = astar_model.run(pcb_render_model.clone());
                     let astar_result = match astar_result {
@@ -929,7 +934,7 @@ impl PcbProblem {
         net_id
     }
     /// assert the sources in the same net are the same
-    pub fn add_connection(&mut self, net_id: NetID, source: Pad, sink: Pad) -> ConnectionID {
+    pub fn add_connection(&mut self, net_id: NetID, source: Pad, sink: Pad, trace_width: f32, trace_clearance: f32) -> ConnectionID {
         let net_info = self.nets.get_mut(&net_id).expect("NetID not found");
         let connection_id = self
             .connection_id_generator
@@ -940,6 +945,8 @@ impl PcbProblem {
             connection_id,
             source,
             sink,
+            trace_width,
+            trace_clearance,
         };
         net_info.connections.insert(connection_id, Rc::new(connection));
         connection_id

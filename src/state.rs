@@ -191,14 +191,19 @@ pub fn pcb_render_model_to_transparent_shape_submissions(
                 },
             }
         }      
+        let mut batch_contents = Vec::new();
         if !circle_instances.is_empty() {
-            let circle_batch = TransparentShapeBatch(vec![(circle_mesh.clone(), circle_instances)]);
-            submissions.push(circle_batch);
+            println!("Circle instance number: {}", circle_instances.len());
+            batch_contents.push((circle_mesh.clone(), circle_instances));
         }
         if !rect_instances.is_empty() {
-            let rect_batch = TransparentShapeBatch(vec![(rect_mesh.clone(), rect_instances)]);
-            submissions.push(rect_batch);
+            println!("Rectangle instance number: {}", rect_instances.len());
+            batch_contents.push((rect_mesh.clone(), rect_instances));
         }  
+        if !batch_contents.is_empty() {
+            let trace_batch = TransparentShapeBatch(batch_contents);
+            submissions.push(trace_batch);
+        }
     }
     submissions
 }

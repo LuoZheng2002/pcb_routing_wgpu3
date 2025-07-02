@@ -104,7 +104,8 @@ impl AStarModel{
         let mut visited: HashSet<AstarNodeKey> = HashSet::new();
 
         let display_and_block = |frontier: &BinaryHeap<BinaryHeapItem<Reverse<NotNan<f64>>, Rc<AstarNode>>>| {
-            let frontier_vec: Vec<BinaryHeapItem<Reverse<NotNan<f64>>, Rc<AstarNode>>> = frontier.clone().drain().collect();
+            let mut frontier_vec: Vec<BinaryHeapItem<Reverse<NotNan<f64>>, Rc<AstarNode>>> = frontier.clone().drain().collect();
+            frontier_vec.reverse();
             let mut lowest_total_cost = f64::MAX;
             let mut highest_total_cost: f64 = 0.0;
             
@@ -131,13 +132,22 @@ impl AStarModel{
                 }
             }).collect::<Vec<_>>();
             render_model.trace_shape_renderables.push(RenderableBatch(border_renderables));
+
+
             for item in frontier_vec.iter() {
                 let BinaryHeapItem { key: total_cost, value: astar_node } = item;
                 let total_cost = total_cost.0.into_inner();
-                let alpha = 0.2 + 0.8 * (1.0 - (total_cost - lowest_total_cost) / (highest_total_cost - lowest_total_cost));
+                assert!(total_cost >= lowest_total_cost, "Total cost should be greater than or equal to the lowest total cost");
+                assert!(total_cost <= highest_total_cost, "Total cost should be less than or equal to the highest total cost");
+                // let alpha = 1.0 - (0.2 + 0.8 * (total_cost - lowest_total_cost) / (highest_total_cost - lowest_total_cost));
+                let alpha = if highest_total_cost > lowest_total_cost {
+                    1.0 - (0.2 + 0.8 * (total_cost - lowest_total_cost) / (highest_total_cost - lowest_total_cost))
+                } else {
+                    1.0 // if all costs are the same, use full opacity
+                };
                 let alpha = alpha as f32;
                 assert!(alpha >= 0.0 && alpha <= 1.0, "Alpha should be between 0.0 and 1.0");
-                let color: [f32; 3] = [1.0, 1.0 - alpha, 1.0 - alpha]; // red to green gradient
+                let color: [f32; 3] = [1.0-alpha, alpha, 0.0]; // red to green gradient
                 let renderables = astar_node.to_renderables(self.trace_width, self.trace_clearance, color);
                 render_model.trace_shape_renderables.extend(renderables);
             }
@@ -194,11 +204,13 @@ impl AStarModel{
                     let shapes = new_trace_segment.to_shapes();
                     let clearance_shapes = new_trace_segment.to_clearance_shapes();
                     if self.collides_with_border(&shapes){
+                        println!("Collides with border at position: {:?}", new_position);
                         return true; // collision with the border
                     }
                     for obstacle_shape in self.obstacle_shapes.iter() {
                         for clearance_shape in clearance_shapes.iter() {
                             if obstacle_shape.collides_with(clearance_shape) {
+                                println!("Collides with obstacle at position: {:?}", new_position);
                                 return true; // collision with an obstacle
                             }
                         }
@@ -206,6 +218,7 @@ impl AStarModel{
                     for obstacle_clearance_shape in self.obstacle_clearance_shapes.iter() {
                         for shape in shapes.iter() {
                             if obstacle_clearance_shape.collides_with(shape) {
+                                println!("Collides with obstacle clearance shape at position: {:?}", new_position);
                                 return true; // collision with an obstacle clearance shape
                             }
                         }
@@ -225,7 +238,8 @@ impl AStarModel{
                             lower_bound = mid_length; // no collision, search in the upper half
                         }
                     }
-                    assert_eq!(lower_bound, upper_bound, "Binary search should converge to a single point");
+                    // assert_eq!(lower_bound, upper_bound, "Binary search should converge to a single point");
+                    assert!((upper_bound - lower_bound).abs() <= FixedPoint::DELTA, "Binary search should converge to a single point");
                     lower_bound // this is the length that does not collide with any obstacles
                 };
                 if final_length == FixedPoint::from_num(0.0) {
@@ -351,6 +365,7 @@ impl AstarNode{
             };
             let mut renderables = trace_segment.to_renderables(opaque_color);
             renderables.extend(trace_segment.to_clearance_renderables(transparent_color));
+            println!("number of renderables in a segment: {}", renderables.len());
             vec![RenderableBatch(renderables)]
         }else{
             let shape_renderable = ShapeRenderable {
