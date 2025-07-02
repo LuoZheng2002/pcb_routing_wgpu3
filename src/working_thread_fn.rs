@@ -23,7 +23,7 @@ pub fn working_thread_fn(pcb_render_model: Arc<Mutex<PcbRenderModel>>){
             clearance: 0.2,
         },
         Pad { 
-            position: FloatVec2 { x: 0.0, y: 5.0 }, 
+            position: FloatVec2 { x: 3.0, y: 5.0 }, 
             shape: PadShape::Square { 
                 side_length: 1.0,
             },

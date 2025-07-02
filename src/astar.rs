@@ -151,6 +151,23 @@ impl AStarModel{
                 let renderables = astar_node.to_renderables(self.trace_width, self.trace_clearance, color);
                 render_model.trace_shape_renderables.extend(renderables);
             }
+            // render the start and end nodes
+            let start_renderable = ShapeRenderable {
+                shape: PrimShape::Circle(CircleShape {
+                    position: self.start.to_float(),
+                    diameter: self.trace_width,
+                }),
+                color: [0.0, 0.0, 1.0, 1.0], // blue start node
+            };
+            let end_renderable = ShapeRenderable {
+                shape: PrimShape::Circle(CircleShape {
+                    position: self.end.to_float(),
+                    diameter: self.trace_width,
+                }),
+                color: [0.0, 1.0, 0.0, 1.0], // green end node
+            };
+            render_model.pad_shape_renderables.push(start_renderable);
+            render_model.pad_shape_renderables.push(end_renderable);
             pcb_render_model.update_pcb_render_model(render_model);
             println!("Press Enter to continue...");
             let mut input = String::new();
@@ -301,7 +318,7 @@ impl AStarModel{
                 let new_y = old_y + direction_vec2.y * final_length;
                 let (x_min, x_max) = (old_x.min(new_x), old_x.max(new_x));
                 let (y_min, y_max) = (old_y.min(new_y), old_y.max(new_y));
-                let midway_length: Option<FixedPoint> = if self.end.x > x_min && self.end.y <x_max{
+                let midway_length: Option<FixedPoint> = if self.end.x > x_min && self.end.x <x_max{
                     Some((self.end.x - old_x).abs())
                 }else if self.end.y > y_min && self.end.y < y_max{
                     Some((self.end.y - old_y).abs())
@@ -312,6 +329,11 @@ impl AStarModel{
                 if let Some(midway_length) = midway_length {
                     assert!(midway_length > FixedPoint::from_num(0.0), "Midway length should be greater than 0.0");
                     assert!(midway_length < final_length, "Midway length should be less than or equal to the final length");
+                    println!("A midway node is triggered! Position: {:?}, Direction: {:?}, Midway Length: {}", 
+                        get_new_position(midway_length), 
+                        direction, 
+                        midway_length
+                    );
                     // push the midway node to the frontier
                     try_push_node_to_frontier(midway_length);
                 }

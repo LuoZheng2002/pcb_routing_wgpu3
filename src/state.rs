@@ -36,7 +36,7 @@ impl State {
         let cursor_timer = self.cursor_timer.get_or_insert_with(|| Instant::now());
         let current_fps_time = fps_timer.elapsed().as_secs_f32();
         if current_fps_time >= 1.0 {
-            println!("FPS: {}", self.accumulated_frame_num);
+            // println!("FPS: {}", self.accumulated_frame_num);
             self.fps = self.accumulated_frame_num;
             self.accumulated_frame_num = 0;
             *fps_timer = Instant::now();
@@ -118,42 +118,7 @@ pub fn pcb_render_model_to_transparent_shape_submissions(
     let pcb_rect_batch = TransparentShapeBatch(vec![(rect_mesh.clone(), vec![pcb_rect_instance])]);
     submissions.push(pcb_rect_batch);
 
-    // Add pads
-    for renderable in &pcb_render_model.pad_shape_renderables {
-        let color = renderable.color;
-        match &renderable.shape{
-            PrimShape::Circle(circle_shape) =>{
-                let CircleShape { diameter, position } = circle_shape;
-                let circle_instance = ShapeInstance {
-                    position: [position.x, position.y, 0.0].into(),
-                    rotation: Quaternion::from(Euler::new(
-                        cgmath::Deg(0.0),
-                        cgmath::Deg(0.0),
-                        cgmath::Deg(0.0),
-                    )),
-                    scale: cgmath::Vector3::new(*diameter, *diameter, 1.0),
-                    color,
-                };
-                let circle_batch = TransparentShapeBatch(vec![(circle_mesh.clone(), vec![circle_instance])]);
-                submissions.push(circle_batch);
-            },
-            PrimShape::Rectangle(rect_shape) => {
-                let RectangleShape { width, height , position, rotation} = rect_shape;
-                let rect_instance = ShapeInstance {
-                    position: [position.x, position.y, 0.0].into(),
-                    rotation: Quaternion::from(Euler::new(
-                        cgmath::Deg(0.0),
-                        cgmath::Deg(0.0),
-                        *rotation,
-                    )),
-                    scale: cgmath::Vector3::new(*width, *height, 1.0),
-                    color,
-                };
-                let rect_batch = TransparentShapeBatch(vec![(rect_mesh.clone(), vec![rect_instance])]);
-                submissions.push(rect_batch);
-            },
-        }
-    }
+   
     // add traces
     for trace in &pcb_render_model.trace_shape_renderables {
         let mut circle_instances: Vec<ShapeInstance> = Vec::new();
@@ -201,6 +166,42 @@ pub fn pcb_render_model_to_transparent_shape_submissions(
         if !batch_contents.is_empty() {
             let trace_batch = TransparentShapeBatch(batch_contents);
             submissions.push(trace_batch);
+        }
+    }
+     // Add pads
+    for renderable in &pcb_render_model.pad_shape_renderables {
+        let color = renderable.color;
+        match &renderable.shape{
+            PrimShape::Circle(circle_shape) =>{
+                let CircleShape { diameter, position } = circle_shape;
+                let circle_instance = ShapeInstance {
+                    position: [position.x, position.y, 0.0].into(),
+                    rotation: Quaternion::from(Euler::new(
+                        cgmath::Deg(0.0),
+                        cgmath::Deg(0.0),
+                        cgmath::Deg(0.0),
+                    )),
+                    scale: cgmath::Vector3::new(*diameter, *diameter, 1.0),
+                    color,
+                };
+                let circle_batch = TransparentShapeBatch(vec![(circle_mesh.clone(), vec![circle_instance])]);
+                submissions.push(circle_batch);
+            },
+            PrimShape::Rectangle(rect_shape) => {
+                let RectangleShape { width, height , position, rotation} = rect_shape;
+                let rect_instance = ShapeInstance {
+                    position: [position.x, position.y, 0.0].into(),
+                    rotation: Quaternion::from(Euler::new(
+                        cgmath::Deg(0.0),
+                        cgmath::Deg(0.0),
+                        *rotation,
+                    )),
+                    scale: cgmath::Vector3::new(*width, *height, 1.0),
+                    color,
+                };
+                let rect_batch = TransparentShapeBatch(vec![(rect_mesh.clone(), vec![rect_instance])]);
+                submissions.push(rect_batch);
+            },
         }
     }
     submissions
