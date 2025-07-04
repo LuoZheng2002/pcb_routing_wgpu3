@@ -1,5 +1,5 @@
 use crate::{
-    pcb_render_model::{RenderableBatch, ShapeRenderable}, prim_shape::{CircleShape, PrimShape, RectangleShape}, vec2::{FixedVec2, FloatVec2}
+    hyperparameters::HALF_PROBABILITY_RAW_SCORE, pcb_render_model::{RenderableBatch, ShapeRenderable}, prim_shape::{CircleShape, PrimShape, RectangleShape}, vec2::{FixedVec2, FloatVec2}
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, PartialOrd, Ord)]
@@ -222,7 +222,15 @@ impl TracePath {
 
     pub fn get_score(&self) -> f64 {
         // to do
-        1.0
+        let score_raw = self.length; // placeholder for actual score calculation
+        let k = f64::ln(2.0) / HALF_PROBABILITY_RAW_SCORE;
+        let score = f64::exp(-k * score_raw);
+        assert!(
+            score >= 0.0 && score <= 1.0,
+            "Score must be between 0 and 1, got: {}",
+            score
+        );
+        score
     }
 
     pub fn to_renderables(&self, color: [f32; 4]) -> [RenderableBatch; 2]{

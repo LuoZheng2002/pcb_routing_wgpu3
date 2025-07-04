@@ -269,7 +269,8 @@ impl ProbaModel {
         block_thread();
 
         // sample and then update posterior
-        for j in 0..4{
+        // to do: specify iteration number
+        for j in 0..2{
             println!("Sampling new traces for iteration {}", j + 1);
             proba_model.sample_new_traces(problem, pcb_render_model.clone());
             display_and_block(&proba_model);
@@ -431,6 +432,25 @@ impl ProbaModel {
                 }
                 let mut obstacle_shapes: Vec<PrimShape> = Vec::new();
                 let mut obstacle_clearance_shapes: Vec<PrimShape> = Vec::new();
+                // add fixed traces to the obstacle shapes
+                for obstacle_connection_id in obstacle_connections.iter() {
+                    let traces = self.connection_to_traces.get(obstacle_connection_id).expect(
+                        format!("ConnectionID {:?} not found in connection_to_traces", obstacle_connection_id).as_str(),
+                    );
+                    let fixed_trace = if let Traces::Fixed(fixed_trace) = traces {
+                        fixed_trace
+                    } else {
+                        continue; // Skip probabilistic traces
+                    };
+                    let trace_segments = &fixed_trace.trace_path.segments;
+                    for segment in trace_segments.iter() {
+                        let shapes = segment.to_shapes();
+                        obstacle_shapes.extend(shapes);
+                        // add clearance shapes
+                        let clearance_shapes = segment.to_clearance_shapes();
+                        obstacle_clearance_shapes.extend(clearance_shapes);
+                    }
+                }
                 // add all sampled traces to the obstacle shapes
                 for (_, proba_trace_id) in sampled_obstacle_traces.iter() {
                     let proba_trace_id = if let Some(proba_trace_id) = proba_trace_id {
@@ -998,7 +1018,7 @@ impl PcbProblem {
                 Some(new_node) => {
                     // If we successfully fixed a trace, push the new node onto the stack
                     println!("Successfully fixed the top ranked trace, pushing new node onto the stack");
-                    assert!(new_node.prob_up_to_date, "New node must be up to date");
+                    // assert!(new_node.prob_up_to_date, "New node must be up to date");
                     node_stack.push(new_node);
                 }
                 None => {
@@ -1011,10 +1031,14 @@ impl PcbProblem {
                     match new_node {
                         Some(new_node) => {
                             // If we successfully updated the probabilistic model, replace the node at the target index with the new node
-                            assert!(target_index < node_stack.len() - 1, "target index cannot be the last node in the stack");
-                            node_stack[target_index + 1] = new_node;
-                            node_stack.truncate(target_index + 2); // Remove all nodes above the target index
-                            println!("Successfully updated the probabilistic model, replacing node at index {}", target_index);
+                            assert!(target_index < node_stack.len(), "Target index must be within the stack bounds");
+                            if target_index == node_stack.len() - 1 {
+                                node_stack.push(new_node);
+                            }else{
+                                node_stack[target_index + 1] = new_node;
+                                node_stack.truncate(target_index + 2); // Remove all nodes above the target index
+                                println!("Successfully updated the probabilistic model, replacing node at index {}", target_index);
+                            }
                         },
                         None => {
                             // If we failed to update the probabilistic model, we pop the current node from the stack

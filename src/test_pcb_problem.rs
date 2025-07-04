@@ -142,3 +142,62 @@ pub fn pcb_problem1()->PcbProblem{
     );
     pcb_problem
 }
+
+pub fn pcb_problem2()->PcbProblem{
+    let mut pcb_problem = PcbProblem::new(20.0, 20.0);
+    let red_net_id = pcb_problem.add_net(Color{r: 255, g: 0, b: 0});
+    let green_net_id = pcb_problem.add_net(Color{r: 0, g: 255, b: 0});
+    let blue_net_id = pcb_problem.add_net(Color{r: 0, g: 0, b: 255});
+    let yellow_net_id = pcb_problem.add_net(Color{r: 255, g: 255, b: 0});
+    let pad = Pad{
+        position: FloatVec2{x: 0.0, y: 0.0},
+        shape: PadShape::Circle { diameter: 0.6},
+        rotation: Deg(0.0),
+        clearance: 0.05,
+    };
+    let mut red_source_pad = pad.clone();
+    red_source_pad.position = FloatVec2 { x: -6.0, y: 3.0 };
+    let mut red_sink_pad = pad.clone();
+    red_sink_pad.position = FloatVec2 { x: 6.0, y: 3.0 };
+    let mut green_source_pad = pad.clone();
+    green_source_pad.position = FloatVec2 { x: -6.0, y: -3.0 };
+    let mut green_sink_pad = pad.clone();
+    green_sink_pad.position = FloatVec2 { x: 6.0, y: -3.0 };
+    let mut blue_source_pad = pad.clone();
+    blue_source_pad.position = FloatVec2 { x: -3.0, y: 6.0 };
+    let mut blue_sink_pad = pad.clone();
+    blue_sink_pad.position = FloatVec2 { x: -3.0, y: -6.0 };
+    let mut yellow_source_pad = pad.clone();
+    yellow_source_pad.position = FloatVec2 { x: 3.0, y: 6.0 };
+    let mut yellow_sink_pad = pad.clone();
+    yellow_sink_pad.position = FloatVec2 { x: 3.0, y: -6.0 };
+    pcb_problem.add_connection(
+        red_net_id, 
+        red_source_pad.clone(),
+        red_sink_pad,
+        0.5,
+        0.2,
+    );
+    pcb_problem.add_connection(
+        green_net_id, 
+        green_source_pad.clone(),
+        green_sink_pad,
+        0.7,
+        0.05,
+    );
+    pcb_problem.add_connection(
+        blue_net_id, 
+        blue_source_pad.clone(),
+        blue_sink_pad,
+        0.6,
+        0.3,
+    );
+    pcb_problem.add_connection(
+        yellow_net_id, 
+        yellow_source_pad.clone(),
+        yellow_sink_pad,
+        0.4,
+        0.1,
+    );
+    pcb_problem
+}

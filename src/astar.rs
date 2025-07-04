@@ -2,7 +2,7 @@ use std::{cell::RefCell, cmp::Reverse, collections::{BinaryHeap, HashSet}, rc::R
 
 use ordered_float::NotNan;
 
-use crate::{binary_heap_item::BinaryHeapItem, block_or_sleep::{block_or_sleep, block_thread}, hyperparameters::{ASTAR_STRIDE, ESTIMATE_COEFFICIENT, TURN_PENALTY}, pcb_render_model::{PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::{CircleShape, PrimShape, RectangleShape}, trace_path::{Direction, TraceAnchors, TracePath, TraceSegment}, vec2::{FixedPoint, FixedVec2, FloatVec2}};
+use crate::{binary_heap_item::BinaryHeapItem, block_or_sleep::{block_or_sleep, block_thread}, hyperparameters::{ASTAR_STRIDE, DISPLAY_ASTAR, ESTIMATE_COEFFICIENT, TURN_PENALTY}, pcb_render_model::{PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::{CircleShape, PrimShape, RectangleShape}, trace_path::{Direction, TraceAnchors, TracePath, TraceSegment}, vec2::{FixedPoint, FixedVec2, FloatVec2}};
 
 
 
@@ -188,7 +188,9 @@ impl AStarModel{
             pcb_render_model.update_pcb_render_model(render_model);
             block_or_sleep();
         };
-        display_and_block(&frontier); // display the initial state of the frontier
+        if DISPLAY_ASTAR{
+            display_and_block(&frontier); // display the initial state of the frontier
+        }
         let max_trials: usize = 200;
         let mut trial_count = 0;
         while !frontier.is_empty(){
@@ -200,7 +202,9 @@ impl AStarModel{
             let current_node = item.value.clone();
             if current_node.position == self.end {
                 frontier.push(item); // push the current node back to the frontier, so that it can be displayed
-                display_and_block(&frontier); // display the current state of the frontier
+                if DISPLAY_ASTAR{
+                    display_and_block(&frontier); // display the initial state of the frontier
+                }
                 // Reached the end node, construct the trace path
                 let trace_path = current_node.to_trace_path(self.trace_width, self.trace_clearance);
                 return Ok(AStarResult { trace_path });
@@ -246,13 +250,11 @@ impl AStarModel{
                     let shapes = new_trace_segment.to_shapes();
                     let clearance_shapes = new_trace_segment.to_clearance_shapes();
                     if self.collides_with_border(&shapes){
-                        println!("Collides with border at position: {:?}", new_position);
                         return true; // collision with the border
                     }
                     for obstacle_shape in self.obstacle_shapes.iter() {
                         for clearance_shape in clearance_shapes.iter() {
                             if obstacle_shape.collides_with(clearance_shape) {
-                                println!("Collides with obstacle at position: {:?}", new_position);
                                 return true; // collision with an obstacle
                             }
                         }
@@ -260,35 +262,12 @@ impl AStarModel{
                     for obstacle_clearance_shape in self.obstacle_clearance_shapes.iter() {
                         for shape in shapes.iter() {
                             if obstacle_clearance_shape.collides_with(shape) {
-                                println!("Collides with obstacle clearance shape at position: {:?}", new_position);
                                 return true; // collision with an obstacle clearance shape
                             }
                         }
                     }
-                    println!("No collision");
                     false // no collision
                 };
-                let final_length = if !check_collision(*ASTAR_STRIDE){
-                    *ASTAR_STRIDE
-                }else{
-                    let mut lower_bound = FixedPoint::from_num(0.0);
-                    let mut upper_bound = *ASTAR_STRIDE;
-                    while lower_bound + FixedPoint::DELTA< upper_bound{
-                        let mid_length = (lower_bound + upper_bound) / 2;
-                        if check_collision(mid_length) {
-                            upper_bound = mid_length; // collision found, search in the lower half
-                        } else {
-                            lower_bound = mid_length; // no collision, search in the upper half
-                        }
-                    }
-                    // assert_eq!(lower_bound, upper_bound, "Binary search should converge to a single point");
-                    assert!((upper_bound - lower_bound).abs() <= FixedPoint::DELTA, "Binary search should converge to a single point");
-                    lower_bound // this is the length that does not collide with any obstacles
-                };
-                if final_length == FixedPoint::from_num(0.0) {
-                    continue; // no valid movement in this direction
-                }
-
                 // secured the position of the new node         
                 // first push this node to the frontier, then we also have to consider a midway related to the goal 
                 let mut try_push_node_to_frontier = |length: FixedPoint|{
@@ -312,7 +291,7 @@ impl AStarModel{
                     } else {
                         0.0 // no turn penalty for the start node
                     };
-                    let length: f64 = (direction.to_fixed_vec2().length() * final_length).to_num();
+                    let length: f64 = (direction.to_fixed_vec2().length() * length).to_num();
                     let actual_cost = current_node.actual_cost + length + turn_penalty;
                     let actual_length = current_node.actual_length + length;
                     let estimated_cost = octile_distance(&new_position, &self.end) * ESTIMATE_COEFFICIENT;
@@ -327,16 +306,33 @@ impl AStarModel{
                         prev_node: Some(current_node.clone()), // link to the previous node
                     };
                     // push directly to the frontier
-                    println!("Pushed a node with position: {:?}, direction: {:?}, total_cost: {}", 
-                        new_node.position, 
-                        new_node.direction, 
-                        new_node.total_cost
-                    );
                     frontier.push(BinaryHeapItem {
                         key: Reverse(NotNan::new(new_node.total_cost).unwrap()), // use Reverse to make it a min heap
                         value: Rc::new(new_node),
                     });
                 };   
+                let final_length = if !check_collision(*ASTAR_STRIDE){
+                    *ASTAR_STRIDE
+                }else{
+                    let mut lower_bound = FixedPoint::from_num(0.0);
+                    let mut upper_bound = *ASTAR_STRIDE;
+                    while lower_bound + FixedPoint::DELTA< upper_bound{
+                        let mid_length = (lower_bound + upper_bound) / 2;
+                        if check_collision(mid_length) {
+                            upper_bound = mid_length; // collision found, search in the lower half
+                        } else {
+                            lower_bound = mid_length; // no collision, search in the upper half
+                        }
+                    }
+                    // assert_eq!(lower_bound, upper_bound, "Binary search should converge to a single point");
+                    assert!((upper_bound - lower_bound).abs() <= FixedPoint::DELTA, "Binary search should converge to a single point");
+                    lower_bound // this is the length that does not collide with any obstacles
+                };
+                if final_length == FixedPoint::from_num(0.0) {
+                    continue; // no valid movement in this direction
+                }
+
+                
                 try_push_node_to_frontier(final_length); // push the node with the final length
                 let old_x = current_node.position.x;
                 let old_y = current_node.position.y;
@@ -355,15 +351,17 @@ impl AStarModel{
                 if let Some(midway_length) = midway_length {
                     assert!(midway_length > FixedPoint::from_num(0.0), "Midway length should be greater than 0.0");
                     assert!(midway_length < final_length, "Midway length should be less than or equal to the final length");
-                    println!("A midway node is triggered! Position: {:?}, Direction: {:?}, Midway Length: {}", 
-                        get_new_position(midway_length), 
-                        direction, 
-                        midway_length
-                    );
+                    // println!("A midway node is triggered! Position: {:?}, Direction: {:?}, Midway Length: {}", 
+                    //     get_new_position(midway_length), 
+                    //     direction, 
+                    //     midway_length
+                    // );
                     // push the midway node to the frontier
                     try_push_node_to_frontier(midway_length);
                 }
-                display_and_block(&frontier); // display the current state of the frontier
+                if DISPLAY_ASTAR{
+                    display_and_block(&frontier); // display the initial state of the frontier
+                }
             }
         }
         Err("No path found".to_string()) // no path found
