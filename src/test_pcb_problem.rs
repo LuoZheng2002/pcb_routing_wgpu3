@@ -153,11 +153,15 @@ pub fn pcb_problem2()->PcbProblem{
         position: FloatVec2{x: 0.0, y: 0.0},
         shape: PadShape::Circle { diameter: 0.6},
         rotation: Deg(0.0),
-        clearance: 0.05,
+        clearance: 0.1,
     };
     let mut red_source_pad = pad.clone();
     red_source_pad.position = FloatVec2 { x: -6.0, y: 3.0 };
+    red_source_pad.clearance = 0.2;
+    red_source_pad.shape = PadShape::Square { side_length: 0.8 };
     let mut red_sink_pad = pad.clone();
+    red_sink_pad.clearance = 0.2;
+    red_sink_pad.shape = PadShape::Square { side_length: 0.8 };
     red_sink_pad.position = FloatVec2 { x: 6.0, y: 3.0 };
     let mut green_source_pad = pad.clone();
     green_source_pad.position = FloatVec2 { x: -6.0, y: -3.0 };
@@ -165,8 +169,10 @@ pub fn pcb_problem2()->PcbProblem{
     green_sink_pad.position = FloatVec2 { x: 6.0, y: -3.0 };
     let mut blue_source_pad = pad.clone();
     blue_source_pad.position = FloatVec2 { x: -3.0, y: 6.0 };
-    let mut blue_sink_pad = pad.clone();
+    blue_source_pad.clearance = 0.15;
+    let mut blue_sink_pad = pad.clone();    
     blue_sink_pad.position = FloatVec2 { x: -3.0, y: -6.0 };
+    blue_sink_pad.clearance = 0.15;
     let mut yellow_source_pad = pad.clone();
     yellow_source_pad.position = FloatVec2 { x: 3.0, y: 6.0 };
     let mut yellow_sink_pad = pad.clone();
