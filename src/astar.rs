@@ -85,6 +85,8 @@ impl AStarModel{
             let dy = (end.y - start.y).abs() as f64;
             f64::max(dx, dy) + (f64::sqrt(2.0) - 1.0) * f64::min(dx, dy)
         }
+
+
         let start_estimated_cost = octile_distance(&self.start, &self.end) * ESTIMATE_COEFFICIENT;
         let start_node = AstarNode {
             position: self.start,
@@ -95,6 +97,8 @@ impl AStarModel{
             total_cost: start_estimated_cost,
             prev_node: None, // no previous node for the start node
         };
+
+
         // frontier is a min heap
         let mut frontier: BinaryHeap<BinaryHeapItem<Reverse<NotNan<f64>>, Rc<AstarNode>>> = BinaryHeap::new();
         frontier.push(BinaryHeapItem{
@@ -191,6 +195,8 @@ impl AStarModel{
         if DISPLAY_ASTAR{
             display_and_block(&frontier); // display the initial state of the frontier
         }
+
+
         let max_trials: usize = 200;
         let mut trial_count = 0;
         while !frontier.is_empty(){
@@ -198,7 +204,11 @@ impl AStarModel{
             if trial_count > max_trials {
                 return Err("A* search exceeded maximum trials".to_string());
             }
+
             let item = frontier.pop().unwrap();
+
+
+
             let current_node = item.value.clone();
             if current_node.position == self.end {
                 frontier.push(item); // push the current node back to the frontier, so that it can be displayed
@@ -211,19 +221,17 @@ impl AStarModel{
             }
             // move to the visited set
             let current_key = AstarNodeKey {
-                position: current_node.position,
-                direction: current_node.direction.clone(),
+                position: current_node.position
             };
             if visited.contains(&current_key) {
                 continue; // already visited this node
             }
             visited.insert(current_key.clone());
             // expand
-            let current_direction = current_node.direction.clone();
-            let directions = match current_direction{
-                Some(dir)=> dir.neighbor_directions(),
-                None => Direction::all_directions(), // if current_direction is None, we are at the start node, so we can go in any direction
-            };
+
+
+            // let current_direction = current_node.direction.clone();
+            let directions = Direction::all_directions();
             for direction in directions {
                 // calculate the next position
                 let direction_vec2 = direction.to_fixed_vec2();
@@ -274,7 +282,6 @@ impl AStarModel{
                     let new_position = get_new_position(length);
                     let astar_node_key = AstarNodeKey {
                         position: new_position,
-                        direction: Some(direction),
                     };
                     // check if the new position is already visited
                     if visited.contains(&astar_node_key) {
@@ -311,6 +318,8 @@ impl AStarModel{
                         value: Rc::new(new_node),
                     });
                 };   
+
+
                 let final_length = if !check_collision(*ASTAR_STRIDE){
                     *ASTAR_STRIDE
                 }else{
@@ -331,34 +340,72 @@ impl AStarModel{
                 if final_length == FixedPoint::from_num(0.0) {
                     continue; // no valid movement in this direction
                 }
+                let length_bound_by_obstacles = final_length; // the length that does not collide with any obstacles
+
+
 
                 
-                try_push_node_to_frontier(final_length); // push the node with the final length
+                // try_push_node_to_frontier(final_length); // push the node with the final length
+
                 let old_x = current_node.position.x;
                 let old_y = current_node.position.y;
-                let new_x = old_x + direction_vec2.x * final_length;
-                let new_y = old_y + direction_vec2.y * final_length;
-                let (x_min, x_max) = (old_x.min(new_x), old_x.max(new_x));
-                let (y_min, y_max) = (old_y.min(new_y), old_y.max(new_y));
-                let midway_length: Option<FixedPoint> = if self.end.x > x_min && self.end.x <x_max{
-                    Some((self.end.x - old_x).abs())
-                }else if self.end.y > y_min && self.end.y < y_max{
-                    Some((self.end.y - old_y).abs())
+                let new_x = old_x + direction_vec2.x * *ASTAR_STRIDE;
+                let new_y = old_y + direction_vec2.y * *ASTAR_STRIDE;
+
+
+                let x_min = old_x.min(new_x);
+                let y_min = old_y.min(new_y);
+                let x_max = old_x.max(new_x);
+                let y_max = old_y.max(new_y);
+
+                let x_max_norm = x_max / *ASTAR_STRIDE;
+                let y_max_norm = y_max / *ASTAR_STRIDE;
+                // to do: check "%"
+                let x_new_clamped = if x_max_norm % 1 == 0{
+                    new_x
                 }else{
-                    None // no midway length, the end point is not in the range of the current segment
+                    x_max_norm.floor()* *ASTAR_STRIDE
                 };
-                // try midway length
-                if let Some(midway_length) = midway_length {
-                    assert!(midway_length > FixedPoint::from_num(0.0), "Midway length should be greater than 0.0");
-                    assert!(midway_length < final_length, "Midway length should be less than or equal to the final length");
-                    // println!("A midway node is triggered! Position: {:?}, Direction: {:?}, Midway Length: {}", 
-                    //     get_new_position(midway_length), 
-                    //     direction, 
-                    //     midway_length
-                    // );
-                    // push the midway node to the frontier
-                    try_push_node_to_frontier(midway_length);
+                let y_new_clamped = if y_max_norm % 1 == 0{
+                    new_y
+                }else{
+                    y_max_norm.floor() * *ASTAR_STRIDE
+                };
+
+                let x_new_length = (x_new_clamped - old_x).abs();
+                let y_new_length = (y_new_clamped - old_y).abs();
+                let length_bound_by_grid = FixedPoint::min(x_new_length, y_new_length);
+                let diag_x = self.end.x - self.end.y + y_min;
+
+                let x_clamped_by_end = if x_min < self.end.x && x_max > self.end.x {
+                    self.end.x
+                }else if direction_vec2.y == 0 && x_min < diag_x && x_max > diag_x {
+                    diag_x
+                }else{
+                    
                 }
+
+                let length_bound_by_end_point = todo!();
+
+                // let midway_length: Option<FixedPoint> = if self.end.x > x_min && self.end.x <x_max{
+                //     Some((self.end.x - old_x).abs())
+                // }else if self.end.y > y_min && self.end.y < y_max{
+                //     Some((self.end.y - old_y).abs())
+                // }else{
+                //     None // no midway length, the end point is not in the range of the current segment
+                // };
+                // // try midway length
+                // if let Some(midway_length) = midway_length {
+                //     assert!(midway_length > FixedPoint::from_num(0.0), "Midway length should be greater than 0.0");
+                //     assert!(midway_length < final_length, "Midway length should be less than or equal to the final length");
+                //     // println!("A midway node is triggered! Position: {:?}, Direction: {:?}, Midway Length: {}", 
+                //     //     get_new_position(midway_length), 
+                //     //     direction, 
+                //     //     midway_length
+                //     // );
+                //     // push the midway node to the frontier
+                //     try_push_node_to_frontier(midway_length);
+                // }
                 if DISPLAY_ASTAR{
                     display_and_block(&frontier); // display the initial state of the frontier
                 }
@@ -371,7 +418,6 @@ impl AStarModel{
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct AstarNodeKey{
     pub position: FixedVec2,
-    pub direction: Option<Direction>, // the direction from the previous node to this node
 }
 pub struct AstarNode{
     pub position: FixedVec2,
