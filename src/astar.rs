@@ -1,5 +1,6 @@
 use std::{cell::RefCell, cmp::Reverse, collections::{BinaryHeap, HashSet}, rc::Rc, sync::{Arc, Mutex}};
 
+use fixed::traits::Fixed;
 use ordered_float::NotNan;
 
 use crate::{binary_heap_item::BinaryHeapItem, block_or_sleep::{block_or_sleep, block_thread}, hyperparameters::{ASTAR_STRIDE, DISPLAY_ASTAR, ESTIMATE_COEFFICIENT, TURN_PENALTY}, pcb_render_model::{PcbRenderModel, RenderableBatch, ShapeRenderable, UpdatePcbRenderModel}, prim_shape::{CircleShape, PrimShape, RectangleShape}, trace_path::{Direction, TraceAnchors, TracePath, TraceSegment}, vec2::{FixedPoint, FixedVec2, FloatVec2}};
@@ -361,12 +362,12 @@ impl AStarModel{
                 let x_max_norm = x_max / *ASTAR_STRIDE;
                 let y_max_norm = y_max / *ASTAR_STRIDE;
                 // to do: check "%"
-                let x_new_clamped = if x_max_norm % 1 == 0{
+                let x_new_clamped = if x_max_norm.floor() == x_max_norm{
                     new_x
                 }else{
                     x_max_norm.floor()* *ASTAR_STRIDE
                 };
-                let y_new_clamped = if y_max_norm % 1 == 0{
+                let y_new_clamped = if y_max_norm.floor() == y_max_norm{
                     new_y
                 }else{
                     y_max_norm.floor() * *ASTAR_STRIDE
@@ -375,17 +376,107 @@ impl AStarModel{
                 let x_new_length = (x_new_clamped - old_x).abs();
                 let y_new_length = (y_new_clamped - old_y).abs();
                 let length_bound_by_grid = FixedPoint::min(x_new_length, y_new_length);
-                let diag_x = self.end.x - self.end.y + y_min;
 
-                let x_clamped_by_end = if x_min < self.end.x && x_max > self.end.x {
-                    self.end.x
-                }else if direction_vec2.y == 0 && x_min < diag_x && x_max > diag_x {
-                    diag_x
-                }else{
+
+                let end_lines = [
+                    (self.end.x, self.end.y, 1.0 , 0.0 ),
+                    (self.end.x, self.end.y, 0.0 , 1.0 ),
+                    (self.end.x, self.end.y, 1.0 , 1.0 ),
+                    (self.end.x, self.end.y, 1.0 , -1.0 ),
+                ];
+
+                let mut min_distance = FixedPoint::MAX;
+
+                let move_dir_x = new_x - old_x;
+                let move_dir_y = new_y - old_y;
+
+                for line in &end_lines {
+                    let (line_x, line_y, line_dir_x, line_dir_y) = *line;
+
+                    if let Some((ix, iy)) = line_intersection_infinite(
+                        (old_x, old_y), (new_x, new_y),
+                        (line_x, line_y), (line_x + FixedPoint::from_num(line_dir_x), line_y + FixedPoint::from_num(line_dir_y))
+                    ) {
+                        let dx = ix - old_x;
+                        let dy = iy - old_y;
+                        
+                        if (move_dir_x * dx >= 0.0) && (move_dir_y * dy >= 0.0) {
+                            if FixedPoint::max(dx.abs(),dy.abs()) < min_distance {
+                                min_distance = FixedPoint::max(dx.abs(),dy.abs());
+                            }
+                        }
+                    }
+                }
+                fn line_intersection_infinite(
+                    a1: (FixedPoint, FixedPoint), a2: (FixedPoint, FixedPoint),
+                    b1: (FixedPoint, FixedPoint), b2: (FixedPoint, FixedPoint)
+                ) -> Option<(FixedPoint, FixedPoint)> {
+                    let a_diff_x = a2.0 - a1.0;
+                    let a_diff_y = a2.1 - a1.1;
+                    let b_diff_x = b2.0 - b1.0;
+                    let b_diff_y = b2.1 - b1.1;
                     
+                    let denominator = a_diff_x * b_diff_y - a_diff_y * b_diff_x;
+                    
+                    if denominator.abs() < f32::EPSILON {
+                        return None; 
+                    }
+                    
+                    let t = ((b1.0 - a1.0) * b_diff_y - (b1.1 - a1.1) * b_diff_x) / denominator;
+                    
+                    if t > 0.0 && t <= 1.0 {
+                        let ix = a1.0 + t * a_diff_x;
+                        let iy = a1.1 + t * a_diff_y;
+                        Some((ix, iy))
+                    } else {
+                        None
+                    }
                 }
 
-                let length_bound_by_end_point = todo!();
+                let length_bound_by_end_point = min_distance;
+
+                let result_length = FixedPoint::min(length_bound_by_obstacles, length_bound_by_end_point);
+                try_push_node_to_frontier(result_length); // push the node with the result_length
+
+                if result_length == length_bound_by_end_point{ // todo: put end in frontier
+                    let new_position = get_new_position(result_length);
+                    let new_direction = Direction::from_points(new_position, self.end);
+                    let new_length = FixedPoint::max((self.end.x-new_position.x).abs(), (self.end.y-new_position.y).abs());
+                    let astar_node_key = AstarNodeKey {
+                        position: self.end,
+                    };
+                    // check if the new position is already visited
+                    if !visited.contains(&astar_node_key) {
+                        
+                        // calculate the cost to reach the next node
+                        let turn_penalty = if new_direction == direction {
+                            0.0 // no turn penalty if the direction is the same
+                        } else {
+                            TURN_PENALTY
+                        };
+
+                        let length: f64 = ((new_direction.to_fixed_vec2().length() * new_length)).to_num();
+                        let actual_cost = current_node.actual_cost + length + turn_penalty;
+                        let actual_length = current_node.actual_length + length;
+                        let estimated_cost = octile_distance(&new_position, &self.end) * ESTIMATE_COEFFICIENT;
+                        let total_cost = actual_cost + estimated_cost;                
+                        let new_node = AstarNode {
+                            position: self.end,
+                            direction: Some(new_direction),
+                            actual_cost,
+                            actual_length,
+                            estimated_cost,
+                            total_cost,
+                            prev_node: Some(current_node.clone()), // link to the previous node
+                        };
+                        // push directly to the frontier
+                        frontier.push(BinaryHeapItem {
+                            key: Reverse(NotNan::new(new_node.total_cost).unwrap()), // use Reverse to make it a min heap
+                            value: Rc::new(new_node),
+                        });
+                    }
+
+                }
 
                 // let midway_length: Option<FixedPoint> = if self.end.x > x_min && self.end.x <x_max{
                 //     Some((self.end.x - old_x).abs())

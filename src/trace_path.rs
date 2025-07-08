@@ -1,5 +1,5 @@
 use crate::{
-    hyperparameters::HALF_PROBABILITY_RAW_SCORE, pcb_render_model::{RenderableBatch, ShapeRenderable}, prim_shape::{CircleShape, PrimShape, RectangleShape}, vec2::{FixedVec2, FloatVec2}
+    hyperparameters::HALF_PROBABILITY_RAW_SCORE, pcb_render_model::{RenderableBatch, ShapeRenderable}, prim_shape::{CircleShape, PrimShape, RectangleShape}, vec2::{FixedPoint, FixedVec2, FloatVec2}
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, PartialOrd, Ord)]
@@ -81,6 +81,25 @@ impl Direction {
             Direction::DownRight => FloatVec2 { x: 1.0, y: -1.0 },
             Direction::DownLeft => FloatVec2 { x: -1.0, y: -1.0 },
         }.to_fixed()
+    }
+
+    pub fn from_points(start: FixedVec2, end: FixedVec2) -> Self {
+        let dx = end.x - start.x;
+        let dy = end.y - start.y;
+
+        match (dx.partial_cmp(&0.0), dy.partial_cmp(&0.0)) {
+            (Some(std::cmp::Ordering::Equal), Some(std::cmp::Ordering::Greater)) => Direction::Up,
+            (Some(std::cmp::Ordering::Equal), Some(std::cmp::Ordering::Less)) => Direction::Down,
+            (Some(std::cmp::Ordering::Greater), Some(std::cmp::Ordering::Equal)) => Direction::Right,
+            (Some(std::cmp::Ordering::Less), Some(std::cmp::Ordering::Equal)) => Direction::Left,
+
+            (Some(std::cmp::Ordering::Greater), Some(std::cmp::Ordering::Greater)) => Direction::UpRight,
+            (Some(std::cmp::Ordering::Less), Some(std::cmp::Ordering::Greater)) => Direction::UpLeft,
+            (Some(std::cmp::Ordering::Greater), Some(std::cmp::Ordering::Less)) => Direction::DownRight,
+            (Some(std::cmp::Ordering::Less), Some(std::cmp::Ordering::Less)) => Direction::DownLeft,
+
+            _ => panic!("collision!!"),
+        }
     }
 }
 
