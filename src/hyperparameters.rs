@@ -30,7 +30,7 @@ pub const CONSTANT_LEARNING_RATE: f64 = 0.01;
 
 pub const TURN_PENALTY: f64 = 1.0;
 
-pub const ESTIMATE_COEFFICIENT: f64 = 2.0;
+pub const ESTIMATE_COEFFICIENT: f64 = 1.0;
 
 lazy_static! {
     pub static ref ASTAR_STRIDE: FixedPoint = FixedPoint::from_num(1.27); // A* search stride

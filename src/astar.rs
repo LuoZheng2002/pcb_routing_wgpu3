@@ -1,7 +1,7 @@
 use std::{
     cell::RefCell,
     cmp::Reverse,
-    collections::{BinaryHeap, HashSet},
+    collections::{BinaryHeap, HashMap, HashSet},
     rc::Rc,
     sync::{Arc, Mutex},
 };
@@ -98,16 +98,281 @@ impl AStarModel {
         }
         false
     }
-    pub fn run(&self, pcb_render_model: Arc<Mutex<PcbRenderModel>>) -> Result<AStarResult, String> {
-        fn octile_distance(start: &FixedVec2, end: &FixedVec2) -> f64 {
-            let start = start.to_float();
-            let end = end.to_float();
-            let dx = (end.x - start.x).abs() as f64;
-            let dy = (end.y - start.y).abs() as f64;
-            f64::max(dx, dy) + (f64::sqrt(2.0) - 1.0) * f64::min(dx, dy)
-        }
 
-        let start_estimated_cost = octile_distance(&self.start, &self.end) * ESTIMATE_COEFFICIENT;
+    fn check_collision(&self, start_position: FixedVec2, end_position: FixedVec2, trace_width: f32, trace_clearance: f32) -> bool {
+        let trace_segment = TraceSegment {
+            start: start_position,
+            end: end_position,
+            direction: Direction::Up, // don't care about the direction here, just need the segment
+            width: trace_width,
+            clearance: trace_clearance,
+        };
+        // new trace segment may collide with obstacles or bounds
+        let shapes = trace_segment.to_shapes();
+        let clearance_shapes = trace_segment.to_clearance_shapes();
+        if self.collides_with_border(&shapes) {
+            return true; // collision with the border
+        }
+        for obstacle_shape in self.obstacle_shapes.iter() {
+            for clearance_shape in clearance_shapes.iter() {
+                if obstacle_shape.collides_with(clearance_shape) {
+                    return true; // collision with an obstacle
+                }
+            }
+        }
+        for obstacle_clearance_shape in self.obstacle_clearance_shapes.iter() {
+            for shape in shapes.iter() {
+                if obstacle_clearance_shape.collides_with(shape) {
+                    return true; // collision with an obstacle clearance shape
+                }
+            }
+        }
+        false // no collision
+    }
+    fn octile_distance(start: &FixedVec2, end: &FixedVec2) -> f64 {
+        let start = start.to_float();
+        let end = end.to_float();
+        let dx = (end.x - start.x).abs() as f64;
+        let dy = (end.y - start.y).abs() as f64;
+        f64::max(dx, dy) + (f64::sqrt(2.0) - 1.0) * f64::min(dx, dy)
+    }
+
+    fn is_grid_point(&self, position: &FixedVec2) -> bool {
+        position.x % *ASTAR_STRIDE == FixedPoint::ZERO
+            && position.y % *ASTAR_STRIDE == FixedPoint::ZERO
+    }
+
+    /// outputs the pairs of direction and the grid point that the direction leads to
+    /// not implemented the collision check yet
+    fn directions_to_grid_points(&self, position: &FixedVec2) -> Vec<(Direction, FixedVec2)>{
+        let mut result: Vec<(Direction, FixedVec2)> = Vec::new();
+        // horizontal directions
+        if position.y.rem_euclid(*ASTAR_STRIDE) == FixedPoint::ZERO {
+            // left
+            let left_grid_point_x = ((position.x - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
+            let right_grid_point_x = ((position.x + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
+            result.push((Direction::Left, FixedVec2::new(left_grid_point_x, position.y)));
+            result.push((Direction::Right, FixedVec2::new(right_grid_point_x, position.y)));
+        }
+        // vertical directions
+        if position.x.rem_euclid(*ASTAR_STRIDE) == FixedPoint::ZERO {
+            // up
+            let up_grid_point_y = ((position.y + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
+            let down_grid_point_y = ((position.y - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
+            result.push((Direction::Up, FixedVec2::new(position.x, up_grid_point_y)));
+            result.push((Direction::Down, FixedVec2::new(position.x, down_grid_point_y)));
+        }
+        // top left to bottom right diagonal
+        if (position.x + position.y).rem_euclid(*ASTAR_STRIDE) == FixedPoint::ZERO {
+            let top_left_grid_point = FixedVec2::new(
+                ((position.x - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE,
+                ((position.y + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE,
+            );
+            let bottom_right_grid_point = FixedVec2::new(
+                ((position.x + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE,
+                ((position.y - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE,
+            );
+            result.push((Direction::TopLeft, top_left_grid_point));
+            result.push((Direction::BottomRight, bottom_right_grid_point));
+        }
+        // top right to bottom left diagonal
+        if (position.x - position.y).rem_euclid(*ASTAR_STRIDE) == FixedPoint::ZERO {
+            let top_right_grid_point = FixedVec2::new(
+                ((position.x + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE,
+                ((position.y + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE,
+            );
+            let bottom_left_grid_point = FixedVec2::new(
+                ((position.x - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE,
+                ((position.y - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE,
+            );
+            result.push((Direction::TopRight, top_right_grid_point));
+            result.push((Direction::BottomLeft, bottom_left_grid_point));
+        }
+        result
+    }
+    fn radial_directions_wrt_obstacles(&self, position: &FixedVec2) -> Vec<Direction>{
+        let mut directions: Vec<Direction> = Vec::new();
+        let mut collides_at_direction: HashMap<Direction, bool> = HashMap::new();
+        let twice_delta = FixedPoint::DELTA * 2;
+        for direction in Direction::all_directions() {
+            let end_position = *position + direction.to_fixed_vec2(twice_delta);
+            let collides = self.check_collision(*position, end_position, self.trace_width, self.trace_clearance);
+            collides_at_direction.insert(direction, collides);
+        }
+        let is_valid_radial_direction = |left_90_dir: Direction, left_45_dir: Direction,
+            dir: Direction, right_45_dir: Direction, right_90_dir: Direction| {
+            // check if the direction is valid, i.e., it is not a 45-degree direction
+            // or it is a 45-degree direction but both left and right directions are not valid
+            let left_blocked = collides_at_direction[&left_90_dir] && 
+                collides_at_direction[&left_45_dir];
+            let right_blocked = collides_at_direction[&right_90_dir] && 
+                collides_at_direction[&right_45_dir];
+            let front_blocked = collides_at_direction[&dir];
+            !front_blocked && (left_blocked || right_blocked)
+        };
+        for direction in Direction::all_directions(){
+            let left_90_dir = direction.left_90_dir();
+            let left_45_dir = direction.left_45_dir();
+            let right_45_dir = direction.right_45_dir();
+            let right_90_dir = direction.right_90_dir();
+            if is_valid_radial_direction(left_90_dir, left_45_dir, direction, right_45_dir, right_90_dir) {
+                directions.push(direction);
+            }
+        }
+        directions
+    }
+    /// 将浮动点移动到稍微好一点的点
+    fn to_nearest_one_step_point(&self, position: &FixedVec2, direction: Direction) -> FixedVec2 {
+        match direction{
+            Direction::Up=>{
+                let new_y = ((position.y + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
+                FixedVec2::new(position.x, new_y)
+            },
+            Direction::Down=>{
+                let new_y = ((position.y - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
+                FixedVec2::new(position.x, new_y)
+            },
+            Direction::Left=>{
+                let new_x = ((position.x - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
+                FixedVec2::new(new_x, position.y)
+            },
+            Direction::Right=>{
+                let new_x = ((position.x + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
+                FixedVec2::new(new_x, position.y)
+            },
+            Direction::TopLeft=>{
+                // 左下到右上的线
+                let current_difference = position.y - position.x;
+                // new_position.y - new_position.x = target_difference
+                // 左下到右上的线，往左上提
+                let target_difference = ((current_difference + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
+                // 往左上走，x和y的和不变
+                let sum = position.y + position.x;
+                // y - x = target_difference
+                // y + x = sum
+                // 求线性方程组
+                let new_x = (sum - target_difference) / 2;
+                let new_y = (sum + target_difference) / 2;
+                FixedVec2::new(new_x, new_y)
+            },
+            Direction::BottomRight=>{
+                // 左下到右上的线
+                let current_difference = position.y - position.x;
+                // new_position.y - new_position.x = target_difference
+                // 左下到右上的线，往右下按
+                let target_difference = ((current_difference - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
+                // 往左上走，x和y的和不变
+                let sum = position.y + position.x;
+                // y - x = target_difference
+                // y + x = sum
+                // 求线性方程组
+                let new_x = (sum - target_difference) / 2;
+                let new_y = (sum + target_difference) / 2;
+                FixedVec2::new(new_x, new_y)
+            },
+            Direction::BottomLeft=>{
+                // 左上到右下的线
+                let current_sum = position.x + position.y;
+                // new_position.y + new_position.x = target_difference
+                // 左上到右下的线， 往左下按
+                let target_sum = ((current_sum - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
+                // 往左下走，y和x的差不变
+                let difference = position.y - position.x;
+                // y - x = difference
+                // y + x = target_sum                
+                // 求线性方程组
+                let new_x = (target_sum - difference) / 2;
+                let new_y = (target_sum + difference) / 2;
+                FixedVec2::new(new_x, new_y)
+            },
+            Direction::TopRight=>{
+                // 左上到右下的线
+                let current_sum = position.x + position.y;
+                // new_position.y + new_position.x = target_difference
+                // 左上到右下的线， 往右上按
+                let target_sum = ((current_sum + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
+                // 往左下走，y和x的差不变
+                let difference = position.y - position.x;
+                // y - x = difference
+                // y + x = target_sum                
+                // 求线性方程组
+                let new_x = (target_sum - difference) / 2;
+                let new_y = (target_sum + difference) / 2;
+                FixedVec2::new(new_x, new_y)
+            },
+        }
+    }
+    /// 判断当前点是否与目标点对齐，返回对齐的方向
+    fn is_aligned_with_end(&self, position: &FixedVec2) -> Option<Direction>{
+        assert_ne!(position, &self.end, "调用该函数前应确保已经处理与end重合的情况");
+        if position.x == self.end.x {
+            if position.y < self.end.y {
+                return Some(Direction::Up);
+            } else {
+                return Some(Direction::Down);
+            }
+        } else if position.y == self.end.y {
+            if position.x < self.end.x {
+                return Some(Direction::Right);
+            } else {
+                return Some(Direction::Left);
+            }
+        } else if (position.x + position.y) == (self.end.x + self.end.y) {
+            if position.x < self.end.x {
+                return Some(Direction::BottomRight);
+            } else {
+                return Some(Direction::TopLeft);
+            }
+        } else if (position.x - position.y) == (self.end.x - self.end.y) {
+            if position.x < self.end.x {
+                return Some(Direction::TopRight);
+            } else {
+                return Some(Direction::BottomLeft);
+            }
+        }
+        None // not aligned with end
+    }
+    /// 获取与end对齐的交点，还是给定方向和线段长度，判断是否有交叉
+    fn get_intersection_with_end_alignments(&self, position: &FixedVec2, direction: Direction, max_length: FixedPoint)->Option<FixedVec2>{
+        assert_ne!(position, &self.end, "调用该函数前应确保已经处理与end重合的情况");
+        assert!(self.is_aligned_with_end(position).is_none(), "调用该函数前应确保当前点不与end对齐");
+
+        // 实现应该和之前差不多
+        // 输出的点的距离应当比max_length小，不然与已有的点重复
+        todo!()
+    }
+
+
+    // 1. 整点/走一步到整点 -> 整点，或被障碍物挡住
+    // 2. 走两步到整点+贴着障碍物 -> 对每个方向，走到最近的“走一步到整点”，或被障碍物挡住
+    // 3. 是否align with end，如果是，并且align成功了的话，将end放入frontier
+
+    // 拦住：网格边缘，align with end，障碍物
+    // 障碍物优先，
+
+
+    // 4. 浮空（走两步到整点+不贴障碍物）-> 选择任意的方向，走到“走一步到整点”，如果被障碍物挡住，选下一个方向；如果所有都被障碍物挡住，选择自己的方向并撞上障碍物
+    
+    // 同时考虑1和2和3
+    // 如果满足1或2或3则不用4，如果1和2和3都失败则考虑4
+    // 这些性质可以在expand的时候计算，不用存储
+    // align with end也可以在expand的时候计算
+    // 可能产生浮空的条件：起点，或是贴着墙走后不再贴着墙走
+
+    // 伪代码：
+    // current node从frontier中取出
+    // current node设为visited
+    // 判断1, 2, 3, 算出它们的expand的集合，然后合并（最多可能有8个方向，一个方向又最多可能有2个position）
+    // 如果1, 2, 3都失败了（没有任何的expand），执行“4”的逻辑，必然会expand出来一个可能不怎么好的点
+    // 将所有的expand的点放入frontier
+
+
+    pub fn run(&self, pcb_render_model: Arc<Mutex<PcbRenderModel>>) -> Result<AStarResult, String> {
+        
+
+        let start_estimated_cost = Self::octile_distance(&self.start, &self.end) * ESTIMATE_COEFFICIENT;
+
+        
         let start_node = AstarNode {
             position: self.start,
             direction: None, // no direction for the start node
@@ -116,7 +381,7 @@ impl AStarModel {
             estimated_cost: start_estimated_cost,
             total_cost: start_estimated_cost,
             prev_node: None, // no previous node for the start node
-            is_near_endpoint: false,
+            status: AstarNodeStatus::Normal, // start node is normal
         };
 
         // frontier is a min heap
@@ -277,109 +542,85 @@ impl AStarModel {
             if visited.contains(&current_key) {
                 continue; // already visited this node
             }
-            if current_node.is_near_endpoint == false {
+            
+            // why? 这个应该可以去掉了
+            if current_node.align_with_end == false {
                 visited.insert(current_key.clone());
                 // expand
+            }
+            // new:
+            // hoist the closure out of the directions loop for the aligned_with_end condition
+            let try_push_node_to_frontier = |direction: Direction, end_position: FixedVec2, aligned_with_end: bool| {
+                let astar_node_key = AstarNodeKey {
+                    position: end_position,
+                };
+                // check if the new position is already visited
+                if visited.contains(&astar_node_key) {
+                    return;
+                }
+                // let length: f64 = (direction.to_fixed_vec2().length() * length).to_num();
+                let length: f64 = (end_position - current_node.position).length().to_num();
+                let actual_cost = current_node.actual_cost + length; // to do: add turn penalty
+                let actual_length = current_node.actual_length + length;
+                let estimated_cost =
+                    AStarModel::octile_distance(&end_position, &self.end) * ESTIMATE_COEFFICIENT;
+                let total_cost = actual_cost + estimated_cost;
+                let new_node = AstarNode {
+                    position: end_position,
+                    direction: Some(direction),
+                    actual_cost,
+                    actual_length,
+                    estimated_cost,
+                    total_cost,
+                    prev_node: Some(current_node.clone()), // link to the previous node
+                    align_with_end: aligned_with_end,
+                };
+                // push directly to the frontier
+                frontier.push(BinaryHeapItem {
+                    key: Reverse(NotNan::new(new_node.total_cost).unwrap()), // use Reverse to make it a min heap
+                    value: Rc::new(new_node),
+                });
+            };
+
+            // new:
+            // hoist the aligned_with_end condition out of the directions loop
+            // 这边应该不用再判断align_with_end，到需要用到的时候求解即可
+            if current_node.align_with_end{         
+                if !self.check_collision(current_node.position, self.end, self.trace_width, self.trace_clearance) {
+                    try_push_node_to_frontier(self.end, false);
+                }
             }
 
             let directions;
             // let current_direction = current_node.direction.clone();
-            if current_node.is_near_endpoint == false {
+            if current_node.align_with_end == false {
                 directions = Direction::all_directions();
             } else {
+                // 这边可以直接把current和end连起来，然后判断形成的trace是否与任何障碍交叉
                 directions = vec![Direction::from_points(current_node.position, self.end)];
             }
             for direction in directions {
                 // calculate the next position
                 let direction_vec2 = direction.to_fixed_vec2();
 
-                let get_new_position = |length: FixedPoint| -> FixedVec2 {
-                    let delta_x = direction_vec2.x * length;
-                    let delta_y = direction_vec2.y * length;
-                    FixedVec2 {
-                        x: current_node.position.x + delta_x,
-                        y: current_node.position.y + delta_y,
-                    }
-                };
+                // fn get_new_position(direction_vec2: FixedVec2, current_position: FixedVec2, length: FixedPoint) -> FixedVec2 {                    
+                //     let delta_x = direction_vec2.x * length;
+                //     let delta_y = direction_vec2.y * length;
+                //     FixedVec2 {
+                //         x: current_position.x + delta_x,
+                //         y: current_position.y + delta_y,
+                //     }
+                // }
 
-                let check_collision = |length: FixedPoint| -> bool {
-                    let new_position = get_new_position(length);
-                    let new_trace_segment = TraceSegment {
-                        start: current_node.position,
-                        end: new_position,
-                        direction,
-                        width: self.trace_width,
-                        clearance: self.trace_clearance,
-                    };
-                    // new trace segment may collide with obstacles or bounds
-                    let shapes = new_trace_segment.to_shapes();
-                    let clearance_shapes = new_trace_segment.to_clearance_shapes();
-                    if self.collides_with_border(&shapes) {
-                        return true; // collision with the border
-                    }
-                    for obstacle_shape in self.obstacle_shapes.iter() {
-                        for clearance_shape in clearance_shapes.iter() {
-                            if obstacle_shape.collides_with(clearance_shape) {
-                                return true; // collision with an obstacle
-                            }
-                        }
-                    }
-                    for obstacle_clearance_shape in self.obstacle_clearance_shapes.iter() {
-                        for shape in shapes.iter() {
-                            if obstacle_clearance_shape.collides_with(shape) {
-                                return true; // collision with an obstacle clearance shape
-                            }
-                        }
-                    }
-                    false // no collision
-                };
+                
                 // secured the position of the new node
                 // first push this node to the frontier, then we also have to consider a midway related to the goal
-                let mut try_push_node_to_frontier = |length: FixedPoint, is_near_endpoint: bool| {
-                    let new_position = get_new_position(length);
-                    let astar_node_key = AstarNodeKey {
-                        position: new_position,
-                    };
-                    // check if the new position is already visited
-                    if visited.contains(&astar_node_key) {
-                        return;
-                    }
 
-                    // calculate the cost to reach the next node
-                    let turn_penalty = if let Some(prev_direction) = current_node.direction {
-                        if prev_direction == direction {
-                            0.0 // no turn penalty if the direction is the same
-                        } else {
-                            TURN_PENALTY
-                        }
-                    } else {
-                        0.0 // no turn penalty for the start node
-                    };
-                    let length: f64 = (direction.to_fixed_vec2().length() * length).to_num();
-                    let actual_cost = current_node.actual_cost + length + turn_penalty;
-                    let actual_length = current_node.actual_length + length;
-                    let estimated_cost =
-                        octile_distance(&new_position, &self.end) * ESTIMATE_COEFFICIENT;
-                    let total_cost = actual_cost + estimated_cost;
-                    let new_node = AstarNode {
-                        position: new_position,
-                        direction: Some(direction),
-                        actual_cost,
-                        actual_length,
-                        estimated_cost,
-                        total_cost,
-                        prev_node: Some(current_node.clone()), // link to the previous node
-                        is_near_endpoint: is_near_endpoint,
-                    };
-                    // push directly to the frontier
-                    frontier.push(BinaryHeapItem {
-                        key: Reverse(NotNan::new(new_node.total_cost).unwrap()), // use Reverse to make it a min heap
-                        value: Rc::new(new_node),
-                    });
-                };
-
-                if current_node.is_near_endpoint == false {
-                    let final_length = if !check_collision(*ASTAR_STRIDE) {
+                // this closure depends on visited, direction, current_node, self.end, frontier
+                
+                
+                if current_node.align_with_end == false {
+                    let final_length = if !self.check_collision(*ASTAR_STRIDE) {
                         *ASTAR_STRIDE
                     } else {
                         let mut lower_bound = FixedPoint::from_num(0.0);
@@ -525,15 +766,7 @@ impl AStarModel {
                     if length_bound_by_end_point < result_length {
                         try_push_node_to_frontier(length_bound_by_end_point, true);
                     }
-                } else {
-                    let near_length = FixedPoint::max(
-                        (current_node.position.x - self.end.x).abs(),
-                        (current_node.position.y - self.end.y).abs(),
-                    );
-                    if !check_collision(near_length) {
-                        try_push_node_to_frontier(near_length, false);
-                    }
-                }
+                } 
 
                 // if result_length == length_bound_by_end_point{ // todo: put end in frontier
                 //     let new_position = get_new_position(result_length);
@@ -607,6 +840,7 @@ impl AStarModel {
 pub struct AstarNodeKey {
     pub position: FixedVec2,
 }
+
 pub struct AstarNode {
     pub position: FixedVec2,
     pub direction: Option<Direction>, // the direction from the previous node to this node
@@ -615,7 +849,7 @@ pub struct AstarNode {
     pub estimated_cost: f64, // the estimated cost to reach the end node from this node
     pub total_cost: f64, // the total cost to reach this node from the start node, including the estimated cost to reach the end node
     pub prev_node: Option<Rc<AstarNode>>, // the previous node in the path, used for backtracking
-    pub is_near_endpoint: bool,
+    // 这边的判断align with end的变量去掉了
 }
 
 impl AstarNode {

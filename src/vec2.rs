@@ -1,3 +1,5 @@
+use std::ops::{Add, Sub};
+
 pub type FixedPoint = fixed::types::I24F8;
 
 #[derive(Debug, Clone, PartialEq, Hash, Eq, Copy, PartialOrd, Ord)]
@@ -7,6 +9,9 @@ pub struct FixedVec2 {
 }
 
 impl FixedVec2 {
+    pub fn new(x: FixedPoint, y: FixedPoint) -> Self {
+        FixedVec2 { x, y }
+    }
     pub fn to_float(&self) -> FloatVec2 {
         FloatVec2 {
             x: self.x.to_num(),
@@ -15,6 +20,27 @@ impl FixedVec2 {
     }
     pub fn length(&self) -> FixedPoint {
         (self.x * self.x + self.y * self.y).sqrt()
+    }
+}
+
+impl Sub for FixedVec2 {
+    type Output = FixedVec2;
+
+    fn sub(self, other: FixedVec2) -> FixedVec2 {
+        FixedVec2 {
+            x: self.x - other.x,
+            y: self.y - other.y,
+        }
+    }
+}
+impl Add for FixedVec2 {
+    type Output = FixedVec2;
+
+    fn add(self, other: FixedVec2) -> FixedVec2 {
+        FixedVec2 {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
     }
 }
 

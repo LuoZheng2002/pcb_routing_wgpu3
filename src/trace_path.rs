@@ -8,10 +8,10 @@ pub enum Direction {
     Down,
     Left,
     Right,
-    UpRight,
-    UpLeft,
-    DownRight,
-    DownLeft,
+    TopRight,
+    TopLeft,
+    BottomRight,
+    BottomLeft,
 }
 impl Direction {
     pub fn to_degree_angle(&self) -> f32 {
@@ -20,43 +20,52 @@ impl Direction {
             Direction::Down => 270.0,
             Direction::Left => 180.0,
             Direction::Right => 0.0,
-            Direction::UpRight => 45.0,
-            Direction::UpLeft => 135.0,
-            Direction::DownRight => 315.0,
-            Direction::DownLeft => 225.0,
+            Direction::TopRight => 45.0,
+            Direction::TopLeft => 135.0,
+            Direction::BottomRight => 315.0,
+            Direction::BottomLeft => 225.0,
         }
     }
-    pub fn neighbor_directions(&self)-> Vec<Direction>{
-        let direction_to_int = |d: &Direction| match d {
+    fn direction_to_int(&self) -> i32 {
+        match self {
             Direction::Up => 0,
-            Direction::UpRight => 1,
+            Direction::TopRight => 1,
             Direction::Right => 2,
-            Direction::DownRight => 3,
+            Direction::BottomRight => 3,
             Direction::Down => 4,
-            Direction::DownLeft => 5,
+            Direction::BottomLeft => 5,
             Direction::Left => 6,
-            Direction::UpLeft => 7,
-        };
-        let int_to_direction = |i: i32| match i {
+            Direction::TopLeft => 7,
+        }
+    }
+    fn int_to_direction(i: i32) -> Direction {
+        match i {
             0 => Direction::Up,
-            1 => Direction::UpRight,
+            1 => Direction::TopRight,
             2 => Direction::Right,
-            3 => Direction::DownRight,
+            3 => Direction::BottomRight,
             4 => Direction::Down,
-            5 => Direction::DownLeft,
+            5 => Direction::BottomLeft,
             6 => Direction::Left,
-            7 => Direction::UpLeft,
+            7 => Direction::TopLeft,
             _ => panic!("Invalid direction index"),
-        };
-        let self_int = direction_to_int(self);
-        let left_45_degree_dir = (self_int - 1 + 8) % 8; // wrap around using modulo
-        let right_45_degree_dir = (self_int + 1) % 8;
-        let straight_dir = self_int; // no change for straight direction
-        vec![
-            int_to_direction(left_45_degree_dir),
-            int_to_direction(straight_dir),
-            int_to_direction(right_45_degree_dir),
-        ]
+        }
+    }
+    pub fn left_90_dir(&self) -> Direction {
+        let new_index = (self.direction_to_int() + 6) % 8; // 6 is equivalent to -2 in mod 8
+        Direction::int_to_direction(new_index)
+    }
+    pub fn right_90_dir(&self) -> Direction {
+        let new_index = (self.direction_to_int() + 2) % 8; // 2 is equivalent to +2 in mod 8
+        Direction::int_to_direction(new_index)
+    }
+    pub fn left_45_dir(&self) -> Direction {
+        let new_index = (self.direction_to_int() + 7) % 8; // 7 is equivalent to -1 in mod 8
+        Direction::int_to_direction(new_index)
+    }
+    pub fn right_45_dir(&self) -> Direction {
+        let new_index = (self.direction_to_int() + 1) % 8; // 1 is equivalent to +1 in mod 8
+        Direction::int_to_direction(new_index)
     }
     pub fn all_directions() -> Vec<Direction> {
         vec![
@@ -64,23 +73,42 @@ impl Direction {
             Direction::Down,
             Direction::Left,
             Direction::Right,
-            Direction::UpRight,
-            Direction::UpLeft,
-            Direction::DownRight,
-            Direction::DownLeft,
+            Direction::TopRight,
+            Direction::TopLeft,
+            Direction::BottomRight,
+            Direction::BottomLeft,
         ]
     }
-    pub fn to_fixed_vec2(&self) -> FixedVec2 {
+    // pub fn to_fixed_vec2(&self) -> FixedVec2 {
+    //     match self {
+    //         Direction::Up => FloatVec2 { x: 0.0, y: 1.0 },
+    //         Direction::Down => FloatVec2 { x: 0.0, y: -1.0 },
+    //         Direction::Left => FloatVec2 { x: -1.0, y: 0.0 },
+    //         Direction::Right => FloatVec2 { x: 1.0, y: 0.0 },
+    //         Direction::TopRight => FloatVec2 { x: 1.0, y: 1.0 },
+    //         Direction::TopLeft => FloatVec2 { x: -1.0, y: 1.0 },
+    //         Direction::BottomRight => FloatVec2 { x: 1.0, y: -1.0 },
+    //         Direction::BottomLeft => FloatVec2 { x: -1.0, y: -1.0 },
+    //     }.to_fixed()
+    // }
+    pub fn to_int_vec2(&self) -> (i32, i32) {
         match self {
-            Direction::Up => FloatVec2 { x: 0.0, y: 1.0 },
-            Direction::Down => FloatVec2 { x: 0.0, y: -1.0 },
-            Direction::Left => FloatVec2 { x: -1.0, y: 0.0 },
-            Direction::Right => FloatVec2 { x: 1.0, y: 0.0 },
-            Direction::UpRight => FloatVec2 { x: 1.0, y: 1.0 },
-            Direction::UpLeft => FloatVec2 { x: -1.0, y: 1.0 },
-            Direction::DownRight => FloatVec2 { x: 1.0, y: -1.0 },
-            Direction::DownLeft => FloatVec2 { x: -1.0, y: -1.0 },
-        }.to_fixed()
+            Direction::Up => (0, 1),
+            Direction::Down => (0, -1),
+            Direction::Left => (-1, 0),
+            Direction::Right => (1, 0),
+            Direction::TopRight => (1, 1),
+            Direction::TopLeft => (-1, 1),
+            Direction::BottomRight => (1, -1),
+            Direction::BottomLeft => (-1, -1),
+        }
+    }
+    pub fn to_fixed_vec2(&self, scale: FixedPoint) -> FixedVec2 {
+        let (dx, dy) = self.to_int_vec2();
+        FixedVec2 {
+            x: FixedPoint::from_num(dx) * scale,
+            y: FixedPoint::from_num(dy) * scale,
+        }
     }
 
     pub fn from_points(start: FixedVec2, end: FixedVec2) -> Self {
@@ -93,10 +121,10 @@ impl Direction {
             (Some(std::cmp::Ordering::Greater), Some(std::cmp::Ordering::Equal)) => Direction::Right,
             (Some(std::cmp::Ordering::Less), Some(std::cmp::Ordering::Equal)) => Direction::Left,
 
-            (Some(std::cmp::Ordering::Greater), Some(std::cmp::Ordering::Greater)) => Direction::UpRight,
-            (Some(std::cmp::Ordering::Less), Some(std::cmp::Ordering::Greater)) => Direction::UpLeft,
-            (Some(std::cmp::Ordering::Greater), Some(std::cmp::Ordering::Less)) => Direction::DownRight,
-            (Some(std::cmp::Ordering::Less), Some(std::cmp::Ordering::Less)) => Direction::DownLeft,
+            (Some(std::cmp::Ordering::Greater), Some(std::cmp::Ordering::Greater)) => Direction::TopRight,
+            (Some(std::cmp::Ordering::Less), Some(std::cmp::Ordering::Greater)) => Direction::TopLeft,
+            (Some(std::cmp::Ordering::Greater), Some(std::cmp::Ordering::Less)) => Direction::BottomRight,
+            (Some(std::cmp::Ordering::Less), Some(std::cmp::Ordering::Less)) => Direction::BottomLeft,
 
             _ => panic!("collision!!"),
         }
