@@ -220,6 +220,15 @@ impl AStarModel{
                 let trace_path = current_node.to_trace_path(self.trace_width, self.trace_clearance);
                 return Ok(AStarResult { trace_path });
             }
+
+            if current_node.is_near_endpoint = true {
+                let near_length = FixedPoint::max((current_node.position.x-self.end.x).abs(), (current_node.position.y-self.end.y).abs())
+                let near_direction = Direction::from_points(current_node.position, self.end);
+                if !check_collision(near_length, near_direction) {
+                    try_push_node_to_frontier(near_length, false, near_direction);
+                }
+                continue;
+            }
             // move to the visited set
             let current_key = AstarNodeKey {
                 position: current_node.position
@@ -246,12 +255,12 @@ impl AStarModel{
                     }
                 };
 
-                let check_collision = |length: FixedPoint| -> bool{
+                let check_collision = |length: FixedPoint, my_direction: Direction| -> bool{
                     let new_position = get_new_position(length);
                     let new_trace_segment = TraceSegment {
                         start: current_node.position,
                         end: new_position,
-                        direction,
+                        direction: my_direction,
                         width: self.trace_width,
                         clearance: self.trace_clearance,
                     };
@@ -279,7 +288,7 @@ impl AStarModel{
                 };
                 // secured the position of the new node         
                 // first push this node to the frontier, then we also have to consider a midway related to the goal 
-                let mut try_push_node_to_frontier = |length: FixedPoint|{
+                let mut try_push_node_to_frontier = |length: FixedPoint, is_near_endpoint: bool, my_direction: Direction|{
                     let new_position = get_new_position(length);
                     let astar_node_key = AstarNodeKey {
                         position: new_position,
@@ -291,7 +300,7 @@ impl AStarModel{
 
                     // calculate the cost to reach the next node
                     let turn_penalty = if let Some(prev_direction) = current_node.direction {
-                        if prev_direction == direction {
+                        if prev_direction == my_direction {
                             0.0 // no turn penalty if the direction is the same
                         } else {
                             TURN_PENALTY
@@ -299,19 +308,20 @@ impl AStarModel{
                     } else {
                         0.0 // no turn penalty for the start node
                     };
-                    let length: f64 = (direction.to_fixed_vec2().length() * length).to_num();
+                    let length: f64 = (my_direction.to_fixed_vec2().length() * length).to_num();
                     let actual_cost = current_node.actual_cost + length + turn_penalty;
                     let actual_length = current_node.actual_length + length;
                     let estimated_cost = octile_distance(&new_position, &self.end) * ESTIMATE_COEFFICIENT;
                     let total_cost = actual_cost + estimated_cost;                
                     let new_node = AstarNode {
                         position: new_position,
-                        direction: Some(direction),
+                        direction: Some(my_direction),
                         actual_cost,
                         actual_length,
                         estimated_cost,
                         total_cost,
                         prev_node: Some(current_node.clone()), // link to the previous node
+                        is_near_endpoint: is_near_endpoint,
                     };
                     // push directly to the frontier
                     frontier.push(BinaryHeapItem {
@@ -321,14 +331,14 @@ impl AStarModel{
                 };   
 
 
-                let final_length = if !check_collision(*ASTAR_STRIDE){
+                let final_length = if !check_collision(*ASTAR_STRIDE, direction){
                     *ASTAR_STRIDE
                 }else{
                     let mut lower_bound = FixedPoint::from_num(0.0);
                     let mut upper_bound = *ASTAR_STRIDE;
                     while lower_bound + FixedPoint::DELTA< upper_bound{
                         let mid_length = (lower_bound + upper_bound) / 2;
-                        if check_collision(mid_length) {
+                        if check_collision(mid_length, direction) {
                             upper_bound = mid_length; // collision found, search in the lower half
                         } else {
                             lower_bound = mid_length; // no collision, search in the upper half
@@ -446,8 +456,11 @@ impl AStarModel{
 
                 let length_bound_by_end_point = min_distance;
                 println!("ob: {:?}, grid: {:?}, end: {:?}",length_bound_by_obstacles, length_bound_by_grid, length_bound_by_end_point);
-                let result_length = FixedPoint::min(FixedPoint::min(length_bound_by_obstacles, length_bound_by_grid), length_bound_by_end_point);
-                try_push_node_to_frontier(result_length); // push the node with the result_length
+                let result_length = FixedPoint::min(length_bound_by_obstacles, length_bound_by_grid);
+                try_push_node_to_frontier(result_length, false, direction); // push the node with the result_length
+                if length_bound_by_end_point < result_length {
+                    try_push_node_to_frontier(length_bound_by_end_point, true, direction);
+                }
 
                 // if result_length == length_bound_by_end_point{ // todo: put end in frontier
                 //     let new_position = get_new_position(result_length);
@@ -529,6 +542,7 @@ pub struct AstarNode{
     pub estimated_cost: f64, // the estimated cost to reach the end node from this node
     pub total_cost: f64, // the total cost to reach this node from the start node, including the estimated cost to reach the end node
     pub prev_node: Option<Rc<AstarNode>>, // the previous node in the path, used for backtracking
+    pub is_near_endpoint: bool
 }
 
 impl AstarNode{
