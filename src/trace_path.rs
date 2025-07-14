@@ -1,5 +1,8 @@
 use crate::{
-    hyperparameters::HALF_PROBABILITY_RAW_SCORE, pcb_render_model::{RenderableBatch, ShapeRenderable}, prim_shape::{CircleShape, PrimShape, RectangleShape}, vec2::{FixedPoint, FixedVec2, FloatVec2}
+    hyperparameters::HALF_PROBABILITY_RAW_SCORE,
+    pcb_render_model::{RenderableBatch, ShapeRenderable},
+    prim_shape::{CircleShape, PrimShape, RectangleShape},
+    vec2::{FixedPoint, FixedVec2, FloatVec2},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, PartialOrd, Ord)]
@@ -14,6 +17,12 @@ pub enum Direction {
     BottomLeft,
 }
 impl Direction {
+    pub fn is_diagonal(&self) -> bool {
+        matches!(
+            self,
+            Direction::TopRight | Direction::TopLeft | Direction::BottomRight | Direction::BottomLeft
+        )
+    }
     pub fn to_degree_angle(&self) -> f32 {
         match self {
             Direction::Up => 90.0,
@@ -114,61 +123,97 @@ impl Direction {
     pub fn from_points(start: FixedVec2, end: FixedVec2) -> Self {
         let dx = end.x - start.x;
         let dy = end.y - start.y;
+        let dy_minus_dx_abs = (dy.abs() - dx.abs()).abs();
+        //
+        match (
+            dx.partial_cmp(&0.0),
+            dy.partial_cmp(&0.0),
+            dy_minus_dx_abs.partial_cmp(&0.0),
+        ) {
+            (
+                Some(std::cmp::Ordering::Equal),
+                Some(std::cmp::Ordering::Greater),
+                Some(std::cmp::Ordering::Greater),
+            ) => Direction::Up,
+            (
+                Some(std::cmp::Ordering::Equal),
+                Some(std::cmp::Ordering::Less),
+                Some(std::cmp::Ordering::Greater),
+            ) => Direction::Down,
+            (
+                Some(std::cmp::Ordering::Greater),
+                Some(std::cmp::Ordering::Equal),
+                Some(std::cmp::Ordering::Greater),
+            ) => Direction::Right,
+            (
+                Some(std::cmp::Ordering::Less),
+                Some(std::cmp::Ordering::Equal),
+                Some(std::cmp::Ordering::Greater),
+            ) => Direction::Left,
 
-        match (dx.partial_cmp(&0.0), dy.partial_cmp(&0.0)) {
-            (Some(std::cmp::Ordering::Equal), Some(std::cmp::Ordering::Greater)) => Direction::Up,
-            (Some(std::cmp::Ordering::Equal), Some(std::cmp::Ordering::Less)) => Direction::Down,
-            (Some(std::cmp::Ordering::Greater), Some(std::cmp::Ordering::Equal)) => Direction::Right,
-            (Some(std::cmp::Ordering::Less), Some(std::cmp::Ordering::Equal)) => Direction::Left,
+            (
+                Some(std::cmp::Ordering::Greater),
+                Some(std::cmp::Ordering::Greater),
+                Some(std::cmp::Ordering::Equal),
+            ) => Direction::TopRight,
+            (
+                Some(std::cmp::Ordering::Less),
+                Some(std::cmp::Ordering::Greater),
+                Some(std::cmp::Ordering::Equal),
+            ) => Direction::TopLeft,
+            (
+                Some(std::cmp::Ordering::Greater),
+                Some(std::cmp::Ordering::Less),
+                Some(std::cmp::Ordering::Equal),
+            ) => Direction::BottomRight,
+            (
+                Some(std::cmp::Ordering::Less),
+                Some(std::cmp::Ordering::Less),
+                Some(std::cmp::Ordering::Equal),
+            ) => Direction::BottomLeft,
 
-            (Some(std::cmp::Ordering::Greater), Some(std::cmp::Ordering::Greater)) => Direction::TopRight,
-            (Some(std::cmp::Ordering::Less), Some(std::cmp::Ordering::Greater)) => Direction::TopLeft,
-            (Some(std::cmp::Ordering::Greater), Some(std::cmp::Ordering::Less)) => Direction::BottomRight,
-            (Some(std::cmp::Ordering::Less), Some(std::cmp::Ordering::Less)) => Direction::BottomLeft,
-
-            _ => panic!("collision!!"),
+            _ => panic!(
+                "Invalid points for direction calculation: dx: {}, dy: {}, dy_minus_dx_abs: {}",
+                dx, dy, dy_minus_dx_abs
+            ),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct TraceSegment {
-    pub start: FixedVec2,     // Start point of the trace segment
-    pub end: FixedVec2,       // End point of the trace segment
-    pub direction: Direction, // Direction of the trace segment
-    pub width: f32,           // Width of the trace segment
-    pub clearance: f32, // Clearance around the trace segment
+    pub start: FixedVec2, // Start point of the trace segment
+    pub end: FixedVec2,   // End point of the trace segment
+    pub width: f32,       // Width of the trace segment
+    pub clearance: f32,   // Clearance around the trace segment
 }
 
 impl TraceSegment {
+    pub fn get_direction(&self) -> Direction {
+        Direction::from_points(self.start, self.end)
+    }
     pub fn to_shapes(&self) -> Vec<PrimShape> {
         // a trace segment is composed of two circles and a rectangle
         let start = self.start.to_float();
         let end = self.end.to_float();
         let segment_length = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
-        let start_circle = PrimShape::Circle(
-            CircleShape {
-                position: start,
-                diameter: self.width,
-            }
-        );
-        let end_circle = PrimShape::Circle(
-            CircleShape {
-                position: end,
-                diameter: self.width,
-            }
-        );
-        let segment_rect = PrimShape::Rectangle(
-            RectangleShape {
-                position: FloatVec2 {
-                    x: (start.x + end.x) / 2.0,
-                    y: (start.y + end.y) / 2.0,
-                },
-                width: segment_length,
-                height: self.width,
-                rotation: cgmath::Deg(self.direction.to_degree_angle()),
-            }
-        );
+        let start_circle = PrimShape::Circle(CircleShape {
+            position: start,
+            diameter: self.width,
+        });
+        let end_circle = PrimShape::Circle(CircleShape {
+            position: end,
+            diameter: self.width,
+        });
+        let segment_rect = PrimShape::Rectangle(RectangleShape {
+            position: FloatVec2 {
+                x: (start.x + end.x) / 2.0,
+                y: (start.y + end.y) / 2.0,
+            },
+            width: segment_length,
+            height: self.width,
+            rotation: cgmath::Deg(self.get_direction().to_degree_angle()),
+        });
         vec![start_circle, end_circle, segment_rect]
     }
     pub fn to_clearance_shapes(&self) -> Vec<PrimShape> {
@@ -178,29 +223,23 @@ impl TraceSegment {
         let segment_length = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
         let new_width = self.width + self.clearance * 2.0;
         let new_diameter = new_width;
-        let clearance_start_circle = PrimShape::Circle(
-            CircleShape {
-                position: start,
-                diameter: new_diameter,
-            }
-        );
-        let clearance_end_circle = PrimShape::Circle(
-            CircleShape {
-                position: end,
-                diameter: new_diameter,
-            }
-        );
-        let clearance_rect = PrimShape::Rectangle(
-            RectangleShape {
-                position: FloatVec2 {
-                    x: (start.x + end.x) / 2.0,
-                    y: (start.y + end.y) / 2.0,
-                },
-                width: segment_length + self.clearance * 2.0,
-                height: new_width,
-                rotation: cgmath::Deg(self.direction.to_degree_angle()),
-            }
-        );
+        let clearance_start_circle = PrimShape::Circle(CircleShape {
+            position: start,
+            diameter: new_diameter,
+        });
+        let clearance_end_circle = PrimShape::Circle(CircleShape {
+            position: end,
+            diameter: new_diameter,
+        });
+        let clearance_rect = PrimShape::Rectangle(RectangleShape {
+            position: FloatVec2 {
+                x: (start.x + end.x) / 2.0,
+                y: (start.y + end.y) / 2.0,
+            },
+            width: segment_length + self.clearance * 2.0,
+            height: new_width,
+            rotation: cgmath::Deg(self.get_direction().to_degree_angle()),
+        });
         vec![clearance_start_circle, clearance_end_circle, clearance_rect]
     }
     pub fn collides_with(&self, other: &TraceSegment) -> bool {
@@ -224,23 +263,19 @@ impl TraceSegment {
         }
         false
     }
-    pub fn to_renderables(&self, color: [f32;4])-> Vec<ShapeRenderable>{
+    pub fn to_renderables(&self, color: [f32; 4]) -> Vec<ShapeRenderable> {
         let shapes = self.to_shapes();
-        shapes.into_iter().map(|shape| {
-            ShapeRenderable {
-                shape,
-                color,
-            }
-        }).collect()
+        shapes
+            .into_iter()
+            .map(|shape| ShapeRenderable { shape, color })
+            .collect()
     }
-    pub fn to_clearance_renderables(&self, color: [f32;4]) -> Vec<ShapeRenderable> {
+    pub fn to_clearance_renderables(&self, color: [f32; 4]) -> Vec<ShapeRenderable> {
         let clearance_shapes = self.to_clearance_shapes();
-        clearance_shapes.into_iter().map(|shape| {
-            ShapeRenderable {
-                shape,
-                color,
-            }
-        }).collect()
+        clearance_shapes
+            .into_iter()
+            .map(|shape| ShapeRenderable { shape, color })
+            .collect()
     }
 }
 
@@ -280,7 +315,7 @@ impl TracePath {
         score
     }
 
-    pub fn to_renderables(&self, color: [f32; 4]) -> [RenderableBatch; 2]{
+    pub fn to_renderables(&self, color: [f32; 4]) -> [RenderableBatch; 2] {
         let mut renderables = Vec::new();
         // Render the segments
         for segment in &self.segments {
@@ -288,7 +323,7 @@ impl TracePath {
             renderables.extend(segment_renderables);
         }
         let mut clearance_renderables = Vec::new();
-        let clearance_color = [color[0], color[1], color[2], color[3]/2.0]; // semi-transparent color
+        let clearance_color = [color[0], color[1], color[2], color[3] / 2.0]; // semi-transparent color
         for segment in &self.segments {
             let segment_clearance_renderables = segment.to_clearance_renderables(clearance_color); // semi-transparent color
             clearance_renderables.extend(segment_clearance_renderables);

@@ -21,6 +21,7 @@ pub const FOURTH_ITERATION_NUM_TRACES: usize = 2;
 
 pub const BLOCK_THREAD: bool = false; // Whether to block the thread when waiting for a trace to be generated
 pub const DISPLAY_ASTAR: bool = true; // Whether to display the A* search process
+pub const DISPLAY_PERIOD_MILLIS: u64 = 0;
 
 pub const MAX_ITERATION: NonZeroUsize =
     NonZeroUsize::new(4).expect("MAX_ITERATION must be non-zero");
@@ -33,7 +34,16 @@ pub const TURN_PENALTY: f64 = 1.0;
 pub const ESTIMATE_COEFFICIENT: f64 = 1.0;
 
 lazy_static! {
-    pub static ref ASTAR_STRIDE: FixedPoint = FixedPoint::from_num(1.27); // A* search stride
+    pub static ref ASTAR_STRIDE: FixedPoint = {
+        let result = FixedPoint::from_num(1.27) + FixedPoint::DELTA;
+        let result_bits = result.to_bits();
+        if result_bits & 1 == 0{
+            println!("A* search stride is even.");
+        }else{
+            println!("A* search stride is odd.");
+        }
+        result
+    }; // A* search stride
     pub static ref SCORE_WEIGHT: Mutex<f64> = Mutex::new(0.3);
     pub static ref OPPORTUNITY_COST_WEIGHT: Mutex<f64> = Mutex::new(0.3);
     pub static ref ITERATION_TO_PRIOR_PROBABILITY: HashMap<NonZeroUsize, f64> = vec![

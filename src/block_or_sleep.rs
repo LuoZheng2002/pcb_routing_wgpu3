@@ -1,5 +1,5 @@
 use crate::hyperparameters::BLOCK_THREAD;
-
+use crate::hyperparameters::DISPLAY_PERIOD_MILLIS;
 
 
 
@@ -8,7 +8,7 @@ pub fn block_or_sleep(){
         block_thread();
     } else {
         // Sleep for a short duration
-        std::thread::sleep(std::time::Duration::from_millis(80));
+        std::thread::sleep(std::time::Duration::from_millis(DISPLAY_PERIOD_MILLIS));
     }
 }
 

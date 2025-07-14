@@ -106,10 +106,13 @@ impl AStarModel {
         trace_width: f32,
         trace_clearance: f32,
     ) -> bool {
+        assert_ne!(
+            start_position, end_position,
+            "Start and end positions should not be the same"
+        );
         let trace_segment = TraceSegment {
             start: start_position,
             end: end_position,
-            direction: Direction::Up, // don't care about the direction here, just need the segment
             width: trace_width,
             clearance: trace_clearance,
         };
@@ -215,6 +218,7 @@ impl AStarModel {
         let twice_delta = FixedPoint::DELTA * 2;
         for direction in Direction::all_directions() {
             let end_position = *position + direction.to_fixed_vec2(twice_delta);
+            assert_ne!(*position, end_position, "assert 1");
             let collides = self.check_collision(
                 *position,
                 end_position,
@@ -257,25 +261,29 @@ impl AStarModel {
     }
     /// 将浮动点移动到稍微好一点的点
     fn to_nearest_one_step_point(&self, position: &FixedVec2, direction: Direction) -> FixedVec2 {
-        match direction {
+        let is_difference_even = (position.x - position.y).to_bits() % 2 == 0;
+        assert!(is_difference_even, "The difference between x and y should be even, x:{}, y:{}, direction: {:?}", position.x, position.y, direction);
+        let result = match direction {
             Direction::Up => {
                 let new_y =
-                    ((position.y + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
+                    (position.y / *ASTAR_STRIDE  + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE;
                 FixedVec2::new(position.x, new_y)
             }
             Direction::Down => {
                 let new_y =
-                    ((position.y - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
+                    (position.y  / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE;
                 FixedVec2::new(position.x, new_y)
             }
             Direction::Left => {
                 let new_x =
-                    ((position.x - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
+                    // ((position.x - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
+                (position.x  / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE;
                 FixedVec2::new(new_x, position.y)
             }
             Direction::Right => {
                 let new_x =
-                    ((position.x + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
+                    // ((position.x + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
+                (position.x / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE;
                 FixedVec2::new(new_x, position.y)
             }
             Direction::TopLeft => {
@@ -283,9 +291,9 @@ impl AStarModel {
                 let current_difference = position.y - position.x;
                 // new_position.y - new_position.x = target_difference
                 // 左下到右上的线，往左上提
-                let target_difference = ((current_difference + FixedPoint::DELTA) / *ASTAR_STRIDE)
-                    .ceil()
-                    * *ASTAR_STRIDE;
+                let target_difference = 
+                    // ((current_difference + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil()* *ASTAR_STRIDE;
+                    (current_difference / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE;
                 // 往左上走，x和y的和不变
                 let sum = position.y + position.x;
                 // y - x = target_difference
@@ -300,9 +308,9 @@ impl AStarModel {
                 let current_difference = position.y - position.x;
                 // new_position.y - new_position.x = target_difference
                 // 左下到右上的线，往右下按
-                let target_difference = ((current_difference - FixedPoint::DELTA) / *ASTAR_STRIDE)
-                    .floor()
-                    * *ASTAR_STRIDE;
+                let target_difference = 
+                // ((current_difference - FixedPoint::DELTA) / *ASTAR_STRIDE).floor()* *ASTAR_STRIDE;
+                    (current_difference / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE;
                 // 往左上走，x和y的和不变
                 let sum = position.y + position.x;
                 // y - x = target_difference
@@ -318,7 +326,8 @@ impl AStarModel {
                 // new_position.y + new_position.x = target_difference
                 // 左上到右下的线， 往左下按
                 let target_sum =
-                    ((current_sum - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
+                    // ((current_sum - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
+                    (current_sum / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE;
                 // 往左下走，y和x的差不变
                 let difference = position.y - position.x;
                 // y - x = difference
@@ -334,7 +343,8 @@ impl AStarModel {
                 // new_position.y + new_position.x = target_difference
                 // 左上到右下的线， 往右上按
                 let target_sum =
-                    ((current_sum + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
+                    // ((current_sum + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
+                    (current_sum / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE;
                 // 往左下走，y和x的差不变
                 let difference = position.y - position.x;
                 // y - x = difference
@@ -344,7 +354,15 @@ impl AStarModel {
                 let new_y = (target_sum + difference) / 2;
                 FixedVec2::new(new_x, new_y)
             }
-        }
+        };
+        let _ = Direction::from_points(*position, result);
+        let is_result_difference_even = (result.x - result.y).to_bits() % 2 == 0;
+        assert!(
+            is_result_difference_even,
+            "Problem: Direction {:?} from position {:?} to result {:?} should yield an even difference, but got odd",
+            direction, position, result
+        );
+        result
     }
     /// 判断当前点是否与目标点对齐，返回对齐的方向
     fn is_aligned_with_end(&self, position: &FixedVec2) -> Option<Direction> {
@@ -394,7 +412,7 @@ impl AStarModel {
 
         let denominator = a_diff_x * b_diff_y - a_diff_y * b_diff_x;
 
-        if denominator.abs() < f32::EPSILON {
+        if denominator.abs() == FixedPoint::ZERO {
             return None;
         }
 
@@ -403,6 +421,12 @@ impl AStarModel {
         if t > 0.0 && t <= 1.0 {
             let ix = a1.0 + t * a_diff_x;
             let iy = a1.1 + t * a_diff_y;
+            let is_intersection_difference_even = (ix - iy).to_bits() % 2 == 0;
+            assert!(
+                is_intersection_difference_even,
+                "The intersection point should have an even difference, x: {}, y: {}, asdf",
+                ix, iy
+            );
             Some((ix, iy))
         } else {
             None
@@ -424,6 +448,19 @@ impl AStarModel {
             self.is_aligned_with_end(position).is_none(),
             "调用该函数前应确保当前点不与end对齐"
         );
+        let is_difference_even = (position.x - position.y).to_bits() % 2 == 0;
+        assert!(
+            is_difference_even,
+            "The difference between x and y should be even, x: {}, y: {}, direction: {:?}",
+            position.x,
+            position.y,
+            direction
+        );
+        let mut max_length = max_length;
+        if !direction.is_diagonal() && max_length.to_bits() % 2 == 1 {
+            max_length -= FixedPoint::DELTA; // ensure the max_length is even
+        }
+
         let new_position = (
             position.x + direction.to_fixed_vec2(max_length).x,
             position.y + direction.to_fixed_vec2(max_length).y,
@@ -440,6 +477,13 @@ impl AStarModel {
                     self.end.y + end_direction.to_fixed_vec2(max_length).y,
                 ),
             ) {
+                let is_intersection_difference_even =
+                    (ix - iy).to_bits() % 2 == 0;
+                assert!(
+                    is_intersection_difference_even,
+                    "The intersection point should have an even difference, x: {}, y: {}, direction: {:?}",
+                    ix, iy, end_direction
+                );
                 let dx = ix - position.x;
                 let dy = iy - position.y;
 
@@ -451,6 +495,13 @@ impl AStarModel {
         if min_distance != FixedPoint::MAX {
             let final_x = position.x + direction.to_fixed_vec2(min_distance).x;
             let final_y = position.y + direction.to_fixed_vec2(min_distance).y;
+            let is_final_difference_even =
+                (final_x - final_y).to_bits() % 2 == 0;
+            assert!(
+                is_final_difference_even,
+                "The final point should have an even difference, x: {}, y: {}, direction: {:?}",
+                final_x, final_y, direction
+            );
             Some(FixedVec2::new(final_x, final_y))
         } else {
             None
@@ -462,6 +513,7 @@ impl AStarModel {
         start_position: &FixedVec2,
         end_position: &FixedVec2,
     ) -> Option<FixedVec2> {
+        println!("binary_approach_to_obstacles");
         let direction = Direction::from_points(*start_position, *end_position);
         let mut lower_bound = FixedPoint::from_num(0.0);
         let mut upper_bound = FixedPoint::max(
@@ -471,6 +523,7 @@ impl AStarModel {
         while lower_bound + FixedPoint::DELTA < upper_bound {
             let mid_length = (lower_bound + upper_bound) / 2;
             let temp_end = *start_position + direction.to_fixed_vec2(mid_length);
+            assert_ne!(*start_position, temp_end, "assert 2");
             if self.check_collision(
                 *start_position,
                 temp_end,
@@ -487,11 +540,14 @@ impl AStarModel {
             (upper_bound - lower_bound).abs() <= FixedPoint::DELTA,
             "Binary search should converge to a single point"
         );
-        if lower_bound == FixedPoint::from_num(0.0) {
-            return None;
-        } else {
-            return Some(*start_position + direction.to_fixed_vec2(lower_bound));
+        let mut result_length = lower_bound;
+        if !direction.is_diagonal() && result_length.to_bits() % 2 == 1{
+            result_length -= FixedPoint::DELTA; // ensure the result length is even
         }
+        if result_length == FixedPoint::ZERO{
+            return None;
+        }
+        Some(*start_position + direction.to_fixed_vec2(result_length))
     }
 
     // 1. 整点/走一步到整点 -> 整点，或被障碍物挡住
@@ -517,6 +573,20 @@ impl AStarModel {
     // 将所有的expand的点放入frontier
 
     pub fn run(&self, pcb_render_model: Arc<Mutex<PcbRenderModel>>) -> Result<AStarResult, String> {
+        let is_start_difference_even = (self.start.x - self.start.y).to_bits() % 2 == 0;
+        assert!(
+            is_start_difference_even,
+            "Start position should have an even difference between x and y, x: {}, y: {}",
+            self.start.x,
+            self.start.y
+        );
+        let is_end_difference_even = (self.end.x - self.end.y).to_bits() % 2 == 0;
+        assert!(
+            is_end_difference_even,
+            "End position should have an even difference between x and y, x: {}, y: {}",
+            self.end.x,
+            self.end.y
+        );
         let start_estimated_cost =
             Self::octile_distance(&self.start, &self.end) * ESTIMATE_COEFFICIENT;
 
@@ -694,6 +764,10 @@ impl AStarModel {
             // new:
             // hoist the closure out of the directions loop for the aligned_with_end condition
             let mut try_push_node_to_frontier = |direction: Direction, end_position: FixedVec2| {
+                let end_position_difference_even = 
+                    (end_position.x - end_position.y).to_bits() % 2 == 0;
+                assert!(end_position_difference_even, "The difference between x and y should be even, x:{}, y:{}, direction: {:?}", end_position.x, end_position.y, direction);
+                
                 let astar_node_key = AstarNodeKey {
                     position: end_position,
                 };
@@ -729,6 +803,7 @@ impl AStarModel {
 
             let end_direction = self.is_aligned_with_end(&current_node.position);
             if !end_direction.is_none() {
+                assert_ne!(current_node.position, self.end, "assert 3");
                 if !self.check_collision(
                     current_node.position,
                     self.end,
@@ -746,9 +821,11 @@ impl AStarModel {
 
             let grid_directions = self.directions_to_grid_points(&current_node.position);
             if self.is_grid_point(&current_node.position) {
+                condition_flag = true;
                 for direction in Direction::all_directions() {
                     let mut end_position =
                         current_node.position + direction.to_fixed_vec2(*ASTAR_STRIDE);
+                    assert_ne!(current_node.position, end_position, "assert 4");
                     if self.check_collision(
                         current_node.position,
                         end_position,
@@ -789,6 +866,8 @@ impl AStarModel {
             } else if !grid_directions.is_empty() {
                 condition_flag = true;
                 for (direction, mut end_position) in grid_directions {
+                    assert_ne!(current_node.position, end_position, "assert 5");
+
                     if self.check_collision(
                         current_node.position,
                         end_position,
@@ -829,53 +908,54 @@ impl AStarModel {
                         }
                     }
                 }
-            } else {
-                let obstacle_directions =
-                    self.radial_directions_wrt_obstacles(&current_node.position);
-                if !obstacle_directions.is_empty() {
-                    condition_flag = true;
-                }
-                for direction in obstacle_directions {
-                    let mut end_position =
-                        self.to_nearest_one_step_point(&current_node.position, direction);
-                    if self.check_collision(
-                        current_node.position,
-                        end_position,
-                        self.trace_width,
-                        self.trace_clearance,
-                    ) {
-                        let temp_end = self
-                            .binary_approach_to_obstacles(&current_node.position, &end_position);
-                        if temp_end.is_none() {
-                            continue;
-                        }
-                        end_position = temp_end.unwrap();
+            }
+
+            let obstacle_directions = self.radial_directions_wrt_obstacles(&current_node.position);
+            if !obstacle_directions.is_empty() {
+                condition_flag = true;
+            }
+            for direction in obstacle_directions {
+                let mut end_position =
+                    self.to_nearest_one_step_point(&current_node.position, direction);
+                assert_ne!(current_node.position, end_position, "assert 6");
+
+                if self.check_collision(
+                    current_node.position,
+                    end_position,
+                    self.trace_width,
+                    self.trace_clearance,
+                ) {
+                    let temp_end =
+                        self.binary_approach_to_obstacles(&current_node.position, &end_position);
+                    if temp_end.is_none() {
+                        continue;
                     }
-                    // println!(
-                    //     "radial_directions_wrt_obstacles: {}, {}",
-                    //     end_position.x, end_position.y
-                    // );
-                    condition_count = condition_count + 1;
-                    try_push_node_to_frontier(direction, end_position);
-                    let max_length = FixedPoint::max(
-                        (current_node.position.x - end_position.x).abs(),
-                        (current_node.position.y - end_position.y).abs(),
+                    end_position = temp_end.unwrap();
+                }
+                // println!(
+                //     "radial_directions_wrt_obstacles: {}, {}",
+                //     end_position.x, end_position.y
+                // );
+                condition_count = condition_count + 1;
+                try_push_node_to_frontier(direction, end_position);
+                let max_length = FixedPoint::max(
+                    (current_node.position.x - end_position.x).abs(),
+                    (current_node.position.y - end_position.y).abs(),
+                );
+                if self.is_aligned_with_end(&current_node.position).is_none() {
+                    let temp_end = self.get_intersection_with_end_alignments(
+                        &current_node.position,
+                        direction,
+                        max_length,
                     );
-                    if self.is_aligned_with_end(&current_node.position).is_none() {
-                        let temp_end = self.get_intersection_with_end_alignments(
-                            &current_node.position,
-                            direction,
-                            max_length,
-                        );
-                        if !temp_end.is_none() {
-                            // println!(
-                            //     "radial_directions_wrt_obstacles: {}, {}",
-                            //     temp_end.unwrap().x,
-                            //     temp_end.unwrap().y
-                            // );
-                            condition_count = condition_count + 1;
-                            try_push_node_to_frontier(direction, temp_end.unwrap());
-                        }
+                    if !temp_end.is_none() {
+                        // println!(
+                        //     "radial_directions_wrt_obstacles: {}, {}",
+                        //     temp_end.unwrap().x,
+                        //     temp_end.unwrap().y
+                        // );
+                        condition_count = condition_count + 1;
+                        try_push_node_to_frontier(direction, temp_end.unwrap());
                     }
                 }
             }
@@ -884,6 +964,8 @@ impl AStarModel {
                 for direction in Direction::all_directions() {
                     let end_position =
                         self.to_nearest_one_step_point(&current_node.position, direction);
+                    assert_ne!(current_node.position, end_position, "assert 7");
+
                     if !self.check_collision(
                         current_node.position,
                         end_position,
@@ -985,13 +1067,18 @@ impl AstarNode {
             let start = anchors[i];
             let end = anchors[i + 1];
             let direction = directions[i].clone();
+            assert_ne!(start, end, "Start and end positions should not be the same");
             let segment = TraceSegment {
                 start,
                 end,
-                direction,
                 width,
                 clearance,
             };
+            assert_eq!(
+                segment.get_direction(),
+                direction,
+                "The direction of the segment should match the direction of the node"
+            );
             segments.push(segment);
         }
         let anchors = TraceAnchors(anchors);
@@ -1020,7 +1107,6 @@ impl AstarNode {
             let trace_segment = TraceSegment {
                 start: self.prev_node.as_ref().unwrap().position,
                 end: self.position,
-                direction: direction.clone(),
                 width,
                 clearance,
             };
