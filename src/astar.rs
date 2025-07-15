@@ -263,6 +263,8 @@ impl AStarModel {
     fn to_nearest_one_step_point(&self, position: &FixedVec2, direction: Direction) -> FixedVec2 {
         let is_difference_even = (position.x - position.y).to_bits() % 2 == 0;
         assert!(is_difference_even, "The difference between x and y should be even, x:{}, y:{}, direction: {:?}", position.x, position.y, direction);
+        // an odd odd point cannot move non-diagonally
+        assert!(direction.is_diagonal() || !position.is_x_odd_y_odd());
         let result = match direction {
             Direction::Up => {
                 let new_y =
@@ -400,36 +402,107 @@ impl AStarModel {
 
     fn line_intersection_infinite(
         &self,
-        a1: (FixedPoint, FixedPoint),
-        a2: (FixedPoint, FixedPoint),
-        b1: (FixedPoint, FixedPoint),
-        b2: (FixedPoint, FixedPoint),
-    ) -> Option<(FixedPoint, FixedPoint)> {
-        let a_diff_x = a2.0 - a1.0;
-        let a_diff_y = a2.1 - a1.1;
-        let b_diff_x = b2.0 - b1.0;
-        let b_diff_y = b2.1 - b1.1;
+        a1: FixedVec2,
+        a2: FixedVec2,
+        b1: FixedVec2,
+        b2: FixedVec2,
+    ) -> Option<FixedVec2> {
 
-        let denominator = a_diff_x * b_diff_y - a_diff_y * b_diff_x;
+        let is_a1_difference_even = (a1.x - a1.y).to_bits() % 2 == 0;
+        assert!(
+            is_a1_difference_even,
+            "The difference between x and y in a should be even, x: {}, y: {}",
+            a1.x,
+            a1.y
+        );
+        let is_b1_difference_even = (b1.x - b1.y).to_bits() % 2 == 0;
+        assert!(
+            is_b1_difference_even,
+            "The difference between x and y in b should be even, x: {}, y: {}",
+            b1.x,
+            b1.y
+        );
+        let (dx1, dy1) = (a2.x - a1.x, a2.y - a1.y);
+        let (dx2, dy2) = (b2.x - b1.x, b2.y - b1.y);
 
-        if denominator.abs() == FixedPoint::ZERO {
-            return None;
-        }
-
-        let t = ((b1.0 - a1.0) * b_diff_y - (b1.1 - a1.1) * b_diff_x) / denominator;
-
-        if t > 0.0 && t <= 1.0 {
-            let ix = a1.0 + t * a_diff_x;
-            let iy = a1.1 + t * a_diff_y;
-            let is_intersection_difference_even = (ix - iy).to_bits() % 2 == 0;
-            assert!(
-                is_intersection_difference_even,
-                "The intersection point should have an even difference, x: {}, y: {}, asdf",
-                ix, iy
-            );
-            Some((ix, iy))
+        // Line 1 coefficients: y = m1 * x + c1
+        let (m1, c1) = if dx1 == 0 {
+            (None, a1.x) // Vertical line: x = c1
+        } else if dy1 == 0 {
+            (Some(0), a1.y) // Horizontal line: y = c1
+        } else if dy1 == dx1 {
+            (Some(1), a1.y - a1.x) // 45°
+        } else if dy1 == -dx1 {
+            (Some(-1), a1.y + a1.x) // -45°
         } else {
-            None
+            panic!("Line 1 is not aligned with the grid, dx1: {}, dy1: {}", dx1, dy1);
+        };
+
+        // Line 2 coefficients
+        let (m2, c2) = if dx2 == 0 {
+            (None, b1.x)
+        } else if dy2 == 0 {
+            (Some(0), b1.y)
+        } else if dy2 == dx2 {
+            (Some(1), b1.y - b1.x)
+        } else if dy2 == -dx2 {
+            (Some(-1), b1.y + b1.x)
+        } else {
+            panic!("Line 2 is not aligned with the grid, dx2: {}, dy2: {}", dx2, dy2);
+        };
+
+        // Intersection logic
+        match (m1, m2) {
+            (Some(m1), Some(m2)) => {
+                assert_ne!(m1, m2, "Lines are parallel, no intersection");
+                // m1 * x + c1 = m2 * x + c2 -> x = (c2 - c1) / (m1 - m2)
+                let x = (c2 - c1) / (m1 - m2);
+                let y = m1 * x + c1;
+                // check boundary
+                let x_a_min = FixedPoint::min(a1.x, a2.x);
+                let x_a_max = FixedPoint::max(a1.x, a2.x);
+                let x_b_min = FixedPoint::min(b1.x, b2.x);
+                let x_b_max = FixedPoint::max(b1.x, b2.x);
+                let x_min = FixedPoint::max(x_a_min, x_b_min);
+                let x_max = FixedPoint::min(x_a_max, x_b_max);
+                if x >= x_min && x <= x_max {
+                    Some(FixedVec2 { x, y })
+                } else {
+                    None
+                }
+            }
+            (None, Some(m2)) => {
+                // Vertical line x = c1, plug into other line
+                let x = c1;
+                let y = m2 * x + c2;
+                let y_a_min = FixedPoint::min(a1.y, a2.y);
+                let y_b_min = FixedPoint::min(b1.y, b2.y);
+                let y_a_max = FixedPoint::max(a1.y, a2.y);
+                let y_b_max = FixedPoint::max(b1.y, b2.y);
+                let y_min = FixedPoint::max(y_a_min, y_b_min);
+                let y_max = FixedPoint::min(y_a_max, y_b_max);
+                if y >= y_min && y <= y_max {
+                    Some(FixedVec2 { x, y })
+                } else {
+                    None
+                }
+            }
+            (Some(m1), None) => {
+                let x = c2;
+                let y = m1 * x + c1;
+                let y_a_min = FixedPoint::min(a1.y, a2.y);
+                let y_b_min = FixedPoint::min(b1.y, b2.y);
+                let y_a_max = FixedPoint::max(a1.y, a2.y);
+                let y_b_max = FixedPoint::max(b1.y, b2.y);
+                let y_min = FixedPoint::max(y_a_min, y_b_min);
+                let y_max = FixedPoint::min(y_a_max, y_b_max);
+                if y >= y_min && y <= y_max {
+                    Some(FixedVec2 { x, y })
+                } else {
+                    None
+                }
+            }
+            (None, None) => panic!("Both lines are vertical, which is not expected in this context"),
         }
     }
 
@@ -461,21 +534,22 @@ impl AStarModel {
             max_length -= FixedPoint::DELTA; // ensure the max_length is even
         }
 
-        let new_position = (
-            position.x + direction.to_fixed_vec2(max_length).x,
-            position.y + direction.to_fixed_vec2(max_length).y,
-        );
+        // let new_position = (
+        //     position.x + direction.to_fixed_vec2(max_length).x,
+        //     position.y + direction.to_fixed_vec2(max_length).y,
+        // );
+        let new_position = *position + direction.to_fixed_vec2(max_length);
         let directions = Direction::all_directions();
         let mut min_distance = FixedPoint::MAX;
         for end_direction in directions {
-            if let Some((ix, iy)) = self.line_intersection_infinite(
-                (position.x, position.y),
+            if end_direction == direction || end_direction == direction.opposite() {
+                continue; // skip the same direction or its opposite
+            }
+            if let Some(FixedVec2 { x: ix, y: iy }) = self.line_intersection_infinite(
+                *position,
                 new_position,
-                (self.end.x, self.end.y),
-                (
-                    self.end.x + end_direction.to_fixed_vec2(max_length).x,
-                    self.end.y + end_direction.to_fixed_vec2(max_length).y,
-                ),
+                self.end,
+                self.end + end_direction.to_fixed_vec2(max_length),
             ) {
                 let is_intersection_difference_even =
                     (ix - iy).to_bits() % 2 == 0;
@@ -541,7 +615,7 @@ impl AStarModel {
             "Binary search should converge to a single point"
         );
         let mut result_length = lower_bound;
-        if !direction.is_diagonal() && result_length.to_bits() % 2 == 1{
+        if result_length.to_bits() % 2 == 1{
             result_length -= FixedPoint::DELTA; // ensure the result length is even
         }
         if result_length == FixedPoint::ZERO{
@@ -910,11 +984,16 @@ impl AStarModel {
                 }
             }
 
-            let obstacle_directions = self.radial_directions_wrt_obstacles(&current_node.position);
-            if !obstacle_directions.is_empty() {
+            let radial_directions = self.radial_directions_wrt_obstacles(&current_node.position);
+            if !radial_directions.is_empty() {
                 condition_flag = true;
             }
-            for direction in obstacle_directions {
+            for direction in radial_directions {
+                assert!(current_node.position.is_sum_even());
+                if !direction.is_diagonal() && current_node.position.is_x_odd_y_odd(){
+                    // 如果当前点是奇数点，且方向不是对角线方向，则不考虑该方向
+                    continue;
+                }
                 let mut end_position =
                     self.to_nearest_one_step_point(&current_node.position, direction);
                 assert_ne!(current_node.position, end_position, "assert 6");

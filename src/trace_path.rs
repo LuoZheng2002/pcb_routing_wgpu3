@@ -17,6 +17,18 @@ pub enum Direction {
     BottomLeft,
 }
 impl Direction {
+    pub fn opposite(&self)-> Direction {
+        match self {
+            Direction::Up => Direction::Down,
+            Direction::Down => Direction::Up,
+            Direction::Left => Direction::Right,
+            Direction::Right => Direction::Left,
+            Direction::TopRight => Direction::BottomLeft,
+            Direction::TopLeft => Direction::BottomRight,
+            Direction::BottomRight => Direction::TopLeft,
+            Direction::BottomLeft => Direction::TopRight,
+        }
+    }
     pub fn is_diagonal(&self) -> bool {
         matches!(
             self,

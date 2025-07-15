@@ -21,6 +21,12 @@ impl FixedVec2 {
     pub fn length(&self) -> FixedPoint {
         (self.x * self.x + self.y * self.y).sqrt()
     }
+    pub fn is_x_odd_y_odd(&self) -> bool {
+        self.x.to_bits() & 1 == 1 && self.y.to_bits() & 1 == 1
+    }
+    pub fn is_sum_even(&self) -> bool {
+        (self.x.to_bits() + self.y.to_bits()) % 2 == 0
+    }
 }
 
 impl Sub for FixedVec2 {
