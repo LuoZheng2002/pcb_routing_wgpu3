@@ -132,7 +132,17 @@ impl Direction {
         }
     }
 
-    pub fn from_points(start: FixedVec2, end: FixedVec2) -> Self {
+    pub fn is_two_points_valid_direction(start: FixedVec2, end: FixedVec2)->bool{
+        match Self::from_points(start, end) {
+            Ok(direction) => {
+                // Check if the direction is valid
+                Self::all_directions().contains(&direction)
+            },
+            Err(_) => false,
+        }
+    }
+
+    pub fn from_points(start: FixedVec2, end: FixedVec2) -> Result<Self, String> {
         let dx = end.x - start.x;
         let dy = end.y - start.y;
         let dy_minus_dx_abs = (dy.abs() - dx.abs()).abs();
@@ -146,48 +156,47 @@ impl Direction {
                 Some(std::cmp::Ordering::Equal),
                 Some(std::cmp::Ordering::Greater),
                 Some(std::cmp::Ordering::Greater),
-            ) => Direction::Up,
+            ) => Ok(Direction::Up),
             (
                 Some(std::cmp::Ordering::Equal),
                 Some(std::cmp::Ordering::Less),
                 Some(std::cmp::Ordering::Greater),
-            ) => Direction::Down,
+            ) => Ok(Direction::Down),
             (
                 Some(std::cmp::Ordering::Greater),
                 Some(std::cmp::Ordering::Equal),
                 Some(std::cmp::Ordering::Greater),
-            ) => Direction::Right,
+            ) => Ok(Direction::Right),
             (
                 Some(std::cmp::Ordering::Less),
                 Some(std::cmp::Ordering::Equal),
                 Some(std::cmp::Ordering::Greater),
-            ) => Direction::Left,
+            ) => Ok(Direction::Left),
+            (
+                Some(std::cmp::Ordering::Greater),
+                Some(std::cmp::Ordering::Greater),
+                Some(std::cmp::Ordering::Equal),
+            ) => Ok(Direction::TopRight),
+            (
+                Some(std::cmp::Ordering::Less),
+                Some(std::cmp::Ordering::Greater),
+                Some(std::cmp::Ordering::Equal),
+            ) => Ok(Direction::TopLeft),
+            (
+                Some(std::cmp::Ordering::Greater),
+                Some(std::cmp::Ordering::Less),
+                Some(std::cmp::Ordering::Equal),
+            ) => Ok(Direction::BottomRight),
+            (
+                Some(std::cmp::Ordering::Less),
+                Some(std::cmp::Ordering::Less),
+                Some(std::cmp::Ordering::Equal),
+            ) => Ok(Direction::BottomLeft),
 
-            (
-                Some(std::cmp::Ordering::Greater),
-                Some(std::cmp::Ordering::Greater),
-                Some(std::cmp::Ordering::Equal),
-            ) => Direction::TopRight,
-            (
-                Some(std::cmp::Ordering::Less),
-                Some(std::cmp::Ordering::Greater),
-                Some(std::cmp::Ordering::Equal),
-            ) => Direction::TopLeft,
-            (
-                Some(std::cmp::Ordering::Greater),
-                Some(std::cmp::Ordering::Less),
-                Some(std::cmp::Ordering::Equal),
-            ) => Direction::BottomRight,
-            (
-                Some(std::cmp::Ordering::Less),
-                Some(std::cmp::Ordering::Less),
-                Some(std::cmp::Ordering::Equal),
-            ) => Direction::BottomLeft,
-
-            _ => panic!(
+            _ => Err(format!(
                 "Invalid points for direction calculation: dx: {}, dy: {}, dy_minus_dx_abs: {}",
                 dx, dy, dy_minus_dx_abs
-            ),
+            )),
         }
     }
 }
@@ -202,7 +211,7 @@ pub struct TraceSegment {
 
 impl TraceSegment {
     pub fn get_direction(&self) -> Direction {
-        Direction::from_points(self.start, self.end)
+        Direction::from_points(self.start, self.end).unwrap()
     }
     pub fn to_shapes(&self) -> Vec<PrimShape> {
         // a trace segment is composed of two circles and a rectangle

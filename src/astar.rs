@@ -100,7 +100,7 @@ impl AStarModel {
     }
 
     pub fn clamp_by_collision(&self, start_pos: FixedVec2, end_pos: FixedVec2) -> Option<FixedVec2>{
-        let _ = Direction::from_points(start_pos, end_pos);
+        assert!(Direction::is_two_points_valid_direction(start_pos, end_pos));
         if self.check_collision(
             start_pos,
             end_pos,
@@ -168,18 +168,34 @@ impl AStarModel {
     /// outputs the pairs of direction and the grid point that the direction leads to
     /// not implemented the collision check yet
     fn directions_to_grid_points(&self, position: FixedVec2) -> Vec<(Direction, FixedVec2)> {
+        fn clamp_down(value: FixedPoint) -> FixedPoint{
+            if value > FixedPoint::ZERO{
+                // ((value + *ASTAR_STRIDE * FixedPoint::DELTA - FixedPoint::DELTA) / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE
+                ((value - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE
+            }else{
+                (value / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE
+            }
+        }
+        fn clamp_up(value: FixedPoint) -> FixedPoint {
+            if value >= FixedPoint::ZERO{
+                (value  / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE
+            }else{
+                // ((value - *ASTAR_STRIDE * FixedPoint::DELTA + FixedPoint::DELTA) / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE
+                ((value + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE
+            }
+        }
         let mut result: Vec<(Direction, FixedVec2)> = Vec::new();
         // horizontal directions
         if position.y.rem_euclid(*ASTAR_STRIDE) == FixedPoint::ZERO {
             // left
-            let left_grid_point_x =
-                (position.x / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE;
-            let right_grid_point_x =
-                (position.x / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE;
+            let left_grid_point_x = clamp_down(position.x);
+            let right_grid_point_x = clamp_up(position.x);
             let left_grid_point = FixedVec2::new(left_grid_point_x, position.y);
             let right_grid_point = FixedVec2::new(right_grid_point_x, position.y);
             assert_ne!(position, left_grid_point, "Left grid point should not be the same as position");
             assert_ne!(position, right_grid_point, "Right grid point should not be the same as position");
+            assert!(Direction::is_two_points_valid_direction(position, left_grid_point));
+            assert!(Direction::is_two_points_valid_direction(position, right_grid_point));
             result.push((
                 Direction::Left,
                 left_grid_point,
@@ -192,14 +208,14 @@ impl AStarModel {
         // vertical directions
         if position.x.rem_euclid(*ASTAR_STRIDE) == FixedPoint::ZERO {
             // up
-            let up_grid_point_y =
-                (position.y / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE;
-            let down_grid_point_y =
-                (position.y / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE;
+            let up_grid_point_y = clamp_up(position.y);
+            let down_grid_point_y = clamp_down(position.y);
             let up_grid_point = FixedVec2::new(position.x, up_grid_point_y);
             let down_grid_point = FixedVec2::new(position.x, down_grid_point_y);
             assert_ne!(position, up_grid_point, "Up grid point should not be the same as position");
             assert_ne!(position, down_grid_point, "Down grid point should not be the same as position");
+            assert!(Direction::is_two_points_valid_direction(position, up_grid_point));
+            assert!(Direction::is_two_points_valid_direction(position, down_grid_point));
             result.push((Direction::Up, up_grid_point));
             result.push((
                 Direction::Down,
@@ -209,30 +225,43 @@ impl AStarModel {
         // top left to bottom right diagonal
         if (position.x + position.y).rem_euclid(*ASTAR_STRIDE) == FixedPoint::ZERO {
             let top_left_grid_point = FixedVec2::new(
-                (position.x / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE,
-                (position.y / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE,
+                clamp_down(position.x),
+                clamp_up(position.y),
             );
             let bottom_right_grid_point = FixedVec2::new(
-                (position.x / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE,
-                (position.y / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE,
+                clamp_up(position.x),
+                clamp_down(position.y),
             );
             assert_ne!(position, top_left_grid_point, "Top left grid point should not be the same as position");
             assert_ne!(position, bottom_right_grid_point, "Bottom right grid point should not be the same as position");
+            // assert!(Direction::is_two_points_valid_direction(position, top_left_grid_point),
+            //     "old position: {:?}, new position: {:?}, dx: {}, dy: {}, direction: TopLeft",
+            //     position, top_left_grid_point, top_left_grid_point.x - position.x, top_left_grid_point.y - position.y);
+            if !Direction::is_two_points_valid_direction(position, top_left_grid_point){
+                println!("Invalid TopLeft direction: old position: {:?}, new position: {:?}, dx: {}, dy: {}, direction: TopLeft",
+                position, top_left_grid_point, top_left_grid_point.x - position.x, top_left_grid_point.y - position.y);
+                println!("x % ASTAR_STRIDE: {}, y % ASTAR_STRIDE: {}", position.x.rem_euclid(*ASTAR_STRIDE).to_bits(), position.y.rem_euclid(*ASTAR_STRIDE).to_bits());
+                println!("ASTAR_STRIDE: {}", ASTAR_STRIDE.to_bits());
+                panic!("Invalid TopLeft direction");
+            }
+            assert!(Direction::is_two_points_valid_direction(position, bottom_right_grid_point));
             result.push((Direction::TopLeft, top_left_grid_point));
             result.push((Direction::BottomRight, bottom_right_grid_point));
         }
         // top right to bottom left diagonal
         if (position.x - position.y).rem_euclid(*ASTAR_STRIDE) == FixedPoint::ZERO {
             let top_right_grid_point = FixedVec2::new(
-                (position.x / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE,
-                (position.y / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE,
+                clamp_up(position.x),
+                clamp_up(position.y),
             );
             let bottom_left_grid_point = FixedVec2::new(
-                (position.x / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE,
-                (position.y / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE,
+                clamp_down(position.x),
+                clamp_down(position.y),
             );
             assert_ne!(position, top_right_grid_point, "Top right grid point should not be the same as position");
             assert_ne!(position, bottom_left_grid_point, "Bottom left grid point should not be the same as position");
+            assert!(Direction::is_two_points_valid_direction(position, top_right_grid_point));
+            assert!(Direction::is_two_points_valid_direction(position, bottom_left_grid_point));
             result.push((Direction::TopRight, top_right_grid_point));
             result.push((Direction::BottomLeft, bottom_left_grid_point));
         }
@@ -383,13 +412,8 @@ impl AStarModel {
                 FixedVec2::new(new_x, new_y)
             }
         };
-        let _ = Direction::from_points(*position, result);
-        let is_result_difference_even = (result.x - result.y).to_bits() % 2 == 0;
-        assert!(
-            is_result_difference_even,
-            "Problem: Direction {:?} from position {:?} to result {:?} should yield an even difference, but got odd",
-            direction, position, result
-        );
+        assert!(Direction::is_two_points_valid_direction(*position, result));
+        assert!(result.is_sum_even(), "Result position should be even, but got odd: {:?}", result);
         result
     }
     /// 判断当前点是否与目标点对齐，返回对齐的方向
@@ -528,7 +552,7 @@ impl AStarModel {
         
         let mut min_distance = FixedPoint::MAX;
         let mut best_intersection: Option<FixedVec2> = None;
-        let current_direction = Direction::from_points(start_pos, end_pos);
+        let current_direction = Direction::from_points(start_pos, end_pos).unwrap();
         let end_directions = [
             current_direction.left_45_dir(),
             current_direction.right_45_dir(),
@@ -565,7 +589,7 @@ impl AStarModel {
         end_position: FixedVec2,
     ) -> Option<FixedVec2> {
         // println!("binary_approach_to_obstacles");
-        let direction = Direction::from_points(start_position, end_position);
+        let direction = Direction::from_points(start_position, end_position).unwrap();
         let mut lower_bound = FixedPoint::from_num(0.0);
         let mut upper_bound = FixedPoint::max(
             (start_position.x - end_position.x).abs(),
@@ -592,13 +616,17 @@ impl AStarModel {
             "Binary search should converge to a single point"
         );
         let mut result_length = lower_bound;
-        if result_length.to_bits() % 2 == 1{
+        let end_position = start_position + direction.to_fixed_vec2(result_length);
+        if !end_position.is_sum_even() || end_position.is_x_odd_y_odd() {
             result_length -= FixedPoint::DELTA; // ensure the result length is even
         }
         if result_length == FixedPoint::ZERO{
             return None;
         }
-        Some(start_position + direction.to_fixed_vec2(result_length))
+        let end_position = start_position + direction.to_fixed_vec2(result_length);
+        assert!(end_position.is_sum_even(), "End position should be even, but got: {:?}", end_position);
+        assert!(!end_position.is_x_odd_y_odd(), "End position should not be odd-odd, but got: {:?}", end_position);
+        Some(end_position)
     }
 
     // 1. 整点/走一步到整点 -> 整点，或被障碍物挡住
@@ -817,6 +845,7 @@ impl AStarModel {
             // new:
             // hoist the closure out of the directions loop for the aligned_with_end condition
             let mut try_push_node_to_frontier = |direction: Direction, end_position: FixedVec2| {
+                assert!(!end_position.is_x_odd_y_odd() || !self.directions_to_grid_points(end_position).is_empty(), "The end position should not be an odd-odd point if there are no directions to grid points");
                 let end_position_difference_even = 
                     (end_position.x - end_position.y).to_bits() % 2 == 0;
                 assert!(end_position_difference_even, "The difference between x and y should be even, x:{}, y:{}, direction: {:?}", end_position.x, end_position.y, direction);
@@ -850,6 +879,8 @@ impl AStarModel {
                     value: Rc::new(new_node),
                 });
             };
+
+            assert!(!current_node.position.is_x_odd_y_odd() || !self.directions_to_grid_points(current_node.position).is_empty(), "The current position should not be an odd-odd point if there are no directions to grid points");
 
             let mut current_node_handled = false;
             let mut condition_count = 0;
@@ -925,7 +956,7 @@ impl AStarModel {
                     // 如果当前点是奇数点，且方向不是对角线方向，则不考虑该方向
                     continue;
                 }
-                let mut end_position =
+                let end_position =
                     self.to_nearest_one_step_point(&current_node.position, direction);
                 assert_ne!(current_node.position, end_position, "assert 6");
 
@@ -966,6 +997,7 @@ impl AStarModel {
             if !current_node_handled {
                 let mut found_point = false;
                 for direction in Direction::all_directions() {
+                    assert!(!current_node.position.is_x_odd_y_odd());
                     let end_position =
                         self.to_nearest_one_step_point(&current_node.position, direction);
                     assert_ne!(current_node.position, end_position, "assert 7");
