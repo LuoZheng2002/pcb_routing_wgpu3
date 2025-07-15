@@ -564,7 +564,7 @@ impl AStarModel {
         start_position: FixedVec2,
         end_position: FixedVec2,
     ) -> Option<FixedVec2> {
-        println!("binary_approach_to_obstacles");
+        // println!("binary_approach_to_obstacles");
         let direction = Direction::from_points(start_position, end_position);
         let mut lower_bound = FixedPoint::from_num(0.0);
         let mut upper_bound = FixedPoint::max(
@@ -784,10 +784,7 @@ impl AStarModel {
         let max_trials: usize = 200;
         let mut trial_count = 0;
         while !frontier.is_empty() {
-            trial_count += 1;
-            if trial_count > max_trials {
-                return Err("A* search exceeded maximum trials".to_string());
-            }
+            
 
             let item = frontier.pop().unwrap();
 
@@ -808,6 +805,11 @@ impl AStarModel {
             };
             if visited.contains(&current_key) {
                 continue; // already visited this node
+            }
+            // don't consider visited nodes as trials
+            trial_count += 1;
+            if trial_count > max_trials {
+                return Err("A* search exceeded maximum trials".to_string());
             }
             visited.insert(current_key.clone());
             // expand
@@ -863,10 +865,10 @@ impl AStarModel {
                     self.trace_width,
                     self.trace_clearance,
                 ) {
-                    println!(
-                        "is_aligned_with_end: ({}, {}) ({}, {})",
-                        current_node.position.x, current_node.position.y, self.end.x, self.end.y
-                    );
+                    // println!(
+                    //     "is_aligned_with_end: ({}, {}) ({}, {})",
+                    //     current_node.position.x, current_node.position.y, self.end.x, self.end.y
+                    // );
                     condition_count = condition_count + 1;
                     try_push_node_to_frontier(end_direction, self.end);
                 }

@@ -307,7 +307,7 @@ impl ProbaModel {
                     .values()
                     .any(|&count| count < max_num_traces)
             {
-                println!("Generation attempt: {}", num_generation_attempts + 1);
+                // println!("Generation attempt: {}", num_generation_attempts + 1);
                 num_generation_attempts += 1;
                 let mut sampled_obstacle_traces: HashMap<ConnectionID, Option<ProbaTraceID>> =
                     HashMap::new();
@@ -511,10 +511,10 @@ impl ProbaModel {
                     };
                     let trace_path = astar_result.trace_path;
                     if visited_traces.contains(&trace_path.anchors) {
-                        println!(
-                            "Trace path {:?} already visited, skipping",
-                            trace_path.anchors
-                        );
+                        // println!(
+                        //     "Trace path {:?} already visited, skipping",
+                        //     trace_path.anchors
+                        // );
                         continue;
                     }
                     visited_traces.insert(trace_path.anchors.clone());
