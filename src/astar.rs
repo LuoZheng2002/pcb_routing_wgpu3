@@ -167,31 +167,31 @@ impl AStarModel {
             && position.y % *ASTAR_STRIDE == FixedPoint::ZERO
     }
 
+    fn clamp_down(value: FixedPoint) -> FixedPoint{
+        if value > FixedPoint::ZERO{
+            ((value - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE
+        }else{
+            (value / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE
+        }
+    }
+    fn clamp_up(value: FixedPoint) -> FixedPoint {
+        if value >= FixedPoint::ZERO{
+            (value  / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE
+        }else{
+            ((value + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE
+        }
+    }
+
     /// outputs the pairs of direction and the grid point that the direction leads to
     /// not implemented the collision check yet
     fn directions_to_grid_points(&self, position: FixedVec2) -> Vec<(Direction, FixedVec2)> {
-        fn clamp_down(value: FixedPoint) -> FixedPoint{
-            if value > FixedPoint::ZERO{
-                // ((value + *ASTAR_STRIDE * FixedPoint::DELTA - FixedPoint::DELTA) / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE
-                ((value - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE
-            }else{
-                (value / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE
-            }
-        }
-        fn clamp_up(value: FixedPoint) -> FixedPoint {
-            if value >= FixedPoint::ZERO{
-                (value  / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE
-            }else{
-                // ((value - *ASTAR_STRIDE * FixedPoint::DELTA + FixedPoint::DELTA) / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE
-                ((value + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE
-            }
-        }
+        
         let mut result: Vec<(Direction, FixedVec2)> = Vec::new();
         // horizontal directions
         if position.y.rem_euclid(*ASTAR_STRIDE) == FixedPoint::ZERO {
             // left
-            let left_grid_point_x = clamp_down(position.x);
-            let right_grid_point_x = clamp_up(position.x);
+            let left_grid_point_x = Self::clamp_down(position.x);
+            let right_grid_point_x = Self::clamp_up(position.x);
             let left_grid_point = FixedVec2::new(left_grid_point_x, position.y);
             let right_grid_point = FixedVec2::new(right_grid_point_x, position.y);
             assert_ne!(position, left_grid_point, "Left grid point should not be the same as position");
@@ -210,8 +210,8 @@ impl AStarModel {
         // vertical directions
         if position.x.rem_euclid(*ASTAR_STRIDE) == FixedPoint::ZERO {
             // up
-            let up_grid_point_y = clamp_up(position.y);
-            let down_grid_point_y = clamp_down(position.y);
+            let up_grid_point_y = Self::clamp_up(position.y);
+            let down_grid_point_y = Self::clamp_down(position.y);
             let up_grid_point = FixedVec2::new(position.x, up_grid_point_y);
             let down_grid_point = FixedVec2::new(position.x, down_grid_point_y);
             assert_ne!(position, up_grid_point, "Up grid point should not be the same as position");
@@ -227,12 +227,12 @@ impl AStarModel {
         // top left to bottom right diagonal
         if (position.x + position.y).rem_euclid(*ASTAR_STRIDE) == FixedPoint::ZERO {
             let top_left_grid_point = FixedVec2::new(
-                clamp_down(position.x),
-                clamp_up(position.y),
+                Self::clamp_down(position.x),
+                Self::clamp_up(position.y),
             );
             let bottom_right_grid_point = FixedVec2::new(
-                clamp_up(position.x),
-                clamp_down(position.y),
+                Self::clamp_up(position.x),
+                Self::clamp_down(position.y),
             );
             assert_ne!(position, top_left_grid_point, "Top left grid point should not be the same as position");
             assert_ne!(position, bottom_right_grid_point, "Bottom right grid point should not be the same as position");
@@ -253,12 +253,12 @@ impl AStarModel {
         // top right to bottom left diagonal
         if (position.x - position.y).rem_euclid(*ASTAR_STRIDE) == FixedPoint::ZERO {
             let top_right_grid_point = FixedVec2::new(
-                clamp_up(position.x),
-                clamp_up(position.y),
+                Self::clamp_up(position.x),
+                Self::clamp_up(position.y),
             );
             let bottom_left_grid_point = FixedVec2::new(
-                clamp_down(position.x),
-                clamp_down(position.y),
+                Self::clamp_down(position.x),
+                Self::clamp_down(position.y),
             );
             assert_ne!(position, top_right_grid_point, "Top right grid point should not be the same as position");
             assert_ne!(position, bottom_left_grid_point, "Bottom left grid point should not be the same as position");
@@ -325,24 +325,22 @@ impl AStarModel {
         let result = match direction {
             Direction::Up => {
                 let new_y =
-                    (position.y / *ASTAR_STRIDE  + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE;
+                    Self::clamp_up(position.y);
                 FixedVec2::new(position.x, new_y)
             }
             Direction::Down => {
-                let new_y =
-                    (position.y  / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE;
+                let new_y = 
+                    Self::clamp_down(position.y);
                 FixedVec2::new(position.x, new_y)
             }
             Direction::Left => {
                 let new_x =
-                    // ((position.x - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
-                (position.x  / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE;
+                    Self::clamp_down(position.x);
                 FixedVec2::new(new_x, position.y)
             }
             Direction::Right => {
                 let new_x =
-                    // ((position.x + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
-                (position.x / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE;
+                    Self::clamp_up(position.x);
                 FixedVec2::new(new_x, position.y)
             }
             Direction::TopLeft => {
@@ -351,8 +349,7 @@ impl AStarModel {
                 // new_position.y - new_position.x = target_difference
                 // 左下到右上的线，往左上提
                 let target_difference = 
-                    // ((current_difference + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil()* *ASTAR_STRIDE;
-                    (current_difference / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE;
+                    Self::clamp_up(current_difference);
                 // 往左上走，x和y的和不变
                 let sum = position.y + position.x;
                 // y - x = target_difference
@@ -368,8 +365,7 @@ impl AStarModel {
                 // new_position.y - new_position.x = target_difference
                 // 左下到右上的线，往右下按
                 let target_difference = 
-                // ((current_difference - FixedPoint::DELTA) / *ASTAR_STRIDE).floor()* *ASTAR_STRIDE;
-                    (current_difference / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE;
+                    Self::clamp_down(current_difference);
                 // 往左上走，x和y的和不变
                 let sum = position.y + position.x;
                 // y - x = target_difference
@@ -385,8 +381,7 @@ impl AStarModel {
                 // new_position.y + new_position.x = target_difference
                 // 左上到右下的线， 往左下按
                 let target_sum =
-                    // ((current_sum - FixedPoint::DELTA) / *ASTAR_STRIDE).floor() * *ASTAR_STRIDE;
-                    (current_sum / *ASTAR_STRIDE - FixedPoint::DELTA).floor() * *ASTAR_STRIDE;
+                    Self::clamp_down(current_sum);
                 // 往左下走，y和x的差不变
                 let difference = position.y - position.x;
                 // y - x = difference
@@ -402,8 +397,7 @@ impl AStarModel {
                 // new_position.y + new_position.x = target_difference
                 // 左上到右下的线， 往右上按
                 let target_sum =
-                    // ((current_sum + FixedPoint::DELTA) / *ASTAR_STRIDE).ceil() * *ASTAR_STRIDE;
-                    (current_sum / *ASTAR_STRIDE + FixedPoint::DELTA).ceil() * *ASTAR_STRIDE;
+                    Self::clamp_up(current_sum);
                 // 往左下走，y和x的差不变
                 let difference = position.y - position.x;
                 // y - x = difference
