@@ -99,6 +99,20 @@ impl AStarModel {
         false
     }
 
+    pub fn clamp_by_collision(&self, start_pos: FixedVec2, end_pos: FixedVec2) -> Option<FixedVec2>{
+        let _ = Direction::from_points(start_pos, end_pos);
+        if self.check_collision(
+            start_pos,
+            end_pos,
+            self.trace_width,
+            self.trace_clearance,
+        ) {
+            self.binary_approach_to_obstacles(start_pos, end_pos)
+        } else {
+            Some(end_pos)
+        }
+    }
+
     fn check_collision(
         &self,
         start_position: FixedVec2,
@@ -584,11 +598,11 @@ impl AStarModel {
 
     fn binary_approach_to_obstacles(
         &self,
-        start_position: &FixedVec2,
-        end_position: &FixedVec2,
+        start_position: FixedVec2,
+        end_position: FixedVec2,
     ) -> Option<FixedVec2> {
         println!("binary_approach_to_obstacles");
-        let direction = Direction::from_points(*start_position, *end_position);
+        let direction = Direction::from_points(start_position, end_position);
         let mut lower_bound = FixedPoint::from_num(0.0);
         let mut upper_bound = FixedPoint::max(
             (start_position.x - end_position.x).abs(),
@@ -596,10 +610,10 @@ impl AStarModel {
         );
         while lower_bound + FixedPoint::DELTA < upper_bound {
             let mid_length = (lower_bound + upper_bound) / 2;
-            let temp_end = *start_position + direction.to_fixed_vec2(mid_length);
-            assert_ne!(*start_position, temp_end, "assert 2");
+            let temp_end = start_position + direction.to_fixed_vec2(mid_length);
+            assert_ne!(start_position, temp_end, "assert 2");
             if self.check_collision(
-                *start_position,
+                start_position,
                 temp_end,
                 self.trace_width,
                 self.trace_clearance,
@@ -621,7 +635,7 @@ impl AStarModel {
         if result_length == FixedPoint::ZERO{
             return None;
         }
-        Some(*start_position + direction.to_fixed_vec2(result_length))
+        Some(start_position + direction.to_fixed_vec2(result_length))
     }
 
     // 1. 整点/走一步到整点 -> 整点，或被障碍物挡住
@@ -645,6 +659,124 @@ impl AStarModel {
     // 判断1, 2, 3, 算出它们的expand的集合，然后合并（最多可能有8个方向，一个方向又最多可能有2个position）
     // 如果1, 2, 3都失败了（没有任何的expand），执行“4”的逻辑，必然会expand出来一个可能不怎么好的点
     // 将所有的expand的点放入frontier
+
+
+    fn display_and_block(&self, pcb_render_model: Arc<Mutex<PcbRenderModel>>, frontier: &BinaryHeap<BinaryHeapItem<Reverse<NotNan<f64>>, Rc<AstarNode>>>) {
+        let mut frontier_vec: Vec<BinaryHeapItem<Reverse<NotNan<f64>>, Rc<AstarNode>>> =
+            frontier.clone().drain().collect();
+        frontier_vec.reverse();
+        let mut lowest_total_cost = f64::MAX;
+        let mut highest_total_cost: f64 = 0.0;
+
+        for item in frontier_vec.iter() {
+            if item.key.0.into_inner() < lowest_total_cost {
+                lowest_total_cost = item.key.0.into_inner();
+            }
+            if item.key.0.into_inner() > highest_total_cost {
+                highest_total_cost = item.key.0.into_inner();
+            }
+        }
+        let mut render_model = PcbRenderModel {
+            width: self.width,
+            height: self.height,
+            trace_shape_renderables: Vec::new(),
+            pad_shape_renderables: Vec::new(),
+        };
+
+        let obstacle_renderables = self
+            .obstacle_shapes
+            .iter()
+            .map(|shape| {
+                ShapeRenderable {
+                    shape: shape.clone(),
+                    color: [0.7, 0.7, 0.7, 1.0], // gray obstacles
+                }
+            })
+            .collect::<Vec<_>>();
+        render_model
+            .trace_shape_renderables
+            .push(RenderableBatch(obstacle_renderables));
+        let obstacle_clearance_renderables = self
+            .obstacle_clearance_shapes
+            .iter()
+            .map(|shape| {
+                ShapeRenderable {
+                    shape: shape.clone(),
+                    color: [0.7, 0.7, 0.7, 0.5], // gray obstacle clearance
+                }
+            })
+            .collect::<Vec<_>>();
+        render_model
+            .trace_shape_renderables
+            .push(RenderableBatch(obstacle_clearance_renderables));
+        // render border
+        let border_renderables = self
+            .get_border_shapes()
+            .iter()
+            .map(|shape| {
+                ShapeRenderable {
+                    shape: shape.clone(),
+                    color: [1.0, 0.0, 1.0, 0.5], // magenta border
+                }
+            })
+            .collect::<Vec<_>>();
+        render_model
+            .trace_shape_renderables
+            .push(RenderableBatch(border_renderables));
+
+        for item in frontier_vec.iter() {
+            let BinaryHeapItem {
+                key: total_cost,
+                value: astar_node,
+            } = item;
+            let total_cost = total_cost.0.into_inner();
+            assert!(
+                total_cost >= lowest_total_cost,
+                "Total cost should be greater than or equal to the lowest total cost"
+            );
+            assert!(
+                total_cost <= highest_total_cost,
+                "Total cost should be less than or equal to the highest total cost"
+            );
+            // let alpha = 1.0 - (0.2 + 0.8 * (total_cost - lowest_total_cost) / (highest_total_cost - lowest_total_cost));
+            let alpha = if highest_total_cost > lowest_total_cost {
+                1.0 - (0.2
+                    + 0.8 * (total_cost - lowest_total_cost)
+                        / (highest_total_cost - lowest_total_cost))
+            } else {
+                1.0 // if all costs are the same, use full opacity
+            };
+            let alpha = alpha.clamp(0.0, 1.0) as f32;
+            assert!(
+                alpha >= 0.0 && alpha <= 1.0,
+                "Alpha should be between 0.0 and 1.0, get: {}",
+                alpha
+            );
+            let color: [f32; 3] = [1.0 - alpha, alpha, 0.0]; // red to green gradient
+            let renderables =
+                astar_node.to_renderables(self.trace_width, self.trace_clearance, color);
+            render_model.trace_shape_renderables.extend(renderables);
+        }
+        // render the start and end nodes
+        let start_renderable = ShapeRenderable {
+            shape: PrimShape::Circle(CircleShape {
+                position: self.start.to_float(),
+                diameter: self.trace_width,
+            }),
+            color: [0.0, 0.0, 1.0, 1.0], // blue start node
+        };
+        let end_renderable = ShapeRenderable {
+            shape: PrimShape::Circle(CircleShape {
+                position: self.end.to_float(),
+                diameter: self.trace_width,
+            }),
+            color: [0.0, 1.0, 0.0, 1.0], // green end node
+        };
+        render_model.pad_shape_renderables.push(start_renderable);
+        render_model.pad_shape_renderables.push(end_renderable);
+        pcb_render_model.update_pcb_render_model(render_model);
+        block_or_sleep();
+    }
 
     pub fn run(&self, pcb_render_model: Arc<Mutex<PcbRenderModel>>) -> Result<AStarResult, String> {
         let is_start_difference_even = (self.start.x - self.start.y).to_bits() % 2 == 0;
@@ -682,126 +814,8 @@ impl AStarModel {
             value: Rc::new(start_node),
         });
         let mut visited: HashSet<AstarNodeKey> = HashSet::new();
-
-        let display_and_block =
-            |frontier: &BinaryHeap<BinaryHeapItem<Reverse<NotNan<f64>>, Rc<AstarNode>>>| {
-                let mut frontier_vec: Vec<BinaryHeapItem<Reverse<NotNan<f64>>, Rc<AstarNode>>> =
-                    frontier.clone().drain().collect();
-                frontier_vec.reverse();
-                let mut lowest_total_cost = f64::MAX;
-                let mut highest_total_cost: f64 = 0.0;
-
-                for item in frontier_vec.iter() {
-                    if item.key.0.into_inner() < lowest_total_cost {
-                        lowest_total_cost = item.key.0.into_inner();
-                    }
-                    if item.key.0.into_inner() > highest_total_cost {
-                        highest_total_cost = item.key.0.into_inner();
-                    }
-                }
-                let mut render_model = PcbRenderModel {
-                    width: self.width,
-                    height: self.height,
-                    trace_shape_renderables: Vec::new(),
-                    pad_shape_renderables: Vec::new(),
-                };
-
-                let obstacle_renderables = self
-                    .obstacle_shapes
-                    .iter()
-                    .map(|shape| {
-                        ShapeRenderable {
-                            shape: shape.clone(),
-                            color: [0.7, 0.7, 0.7, 1.0], // gray obstacles
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                render_model
-                    .trace_shape_renderables
-                    .push(RenderableBatch(obstacle_renderables));
-                let obstacle_clearance_renderables = self
-                    .obstacle_clearance_shapes
-                    .iter()
-                    .map(|shape| {
-                        ShapeRenderable {
-                            shape: shape.clone(),
-                            color: [0.7, 0.7, 0.7, 0.5], // gray obstacle clearance
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                render_model
-                    .trace_shape_renderables
-                    .push(RenderableBatch(obstacle_clearance_renderables));
-                // render border
-                let border_renderables = self
-                    .get_border_shapes()
-                    .iter()
-                    .map(|shape| {
-                        ShapeRenderable {
-                            shape: shape.clone(),
-                            color: [1.0, 0.0, 1.0, 0.5], // magenta border
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                render_model
-                    .trace_shape_renderables
-                    .push(RenderableBatch(border_renderables));
-
-                for item in frontier_vec.iter() {
-                    let BinaryHeapItem {
-                        key: total_cost,
-                        value: astar_node,
-                    } = item;
-                    let total_cost = total_cost.0.into_inner();
-                    assert!(
-                        total_cost >= lowest_total_cost,
-                        "Total cost should be greater than or equal to the lowest total cost"
-                    );
-                    assert!(
-                        total_cost <= highest_total_cost,
-                        "Total cost should be less than or equal to the highest total cost"
-                    );
-                    // let alpha = 1.0 - (0.2 + 0.8 * (total_cost - lowest_total_cost) / (highest_total_cost - lowest_total_cost));
-                    let alpha = if highest_total_cost > lowest_total_cost {
-                        1.0 - (0.2
-                            + 0.8 * (total_cost - lowest_total_cost)
-                                / (highest_total_cost - lowest_total_cost))
-                    } else {
-                        1.0 // if all costs are the same, use full opacity
-                    };
-                    let alpha = alpha.clamp(0.0, 1.0) as f32;
-                    assert!(
-                        alpha >= 0.0 && alpha <= 1.0,
-                        "Alpha should be between 0.0 and 1.0, get: {}",
-                        alpha
-                    );
-                    let color: [f32; 3] = [1.0 - alpha, alpha, 0.0]; // red to green gradient
-                    let renderables =
-                        astar_node.to_renderables(self.trace_width, self.trace_clearance, color);
-                    render_model.trace_shape_renderables.extend(renderables);
-                }
-                // render the start and end nodes
-                let start_renderable = ShapeRenderable {
-                    shape: PrimShape::Circle(CircleShape {
-                        position: self.start.to_float(),
-                        diameter: self.trace_width,
-                    }),
-                    color: [0.0, 0.0, 1.0, 1.0], // blue start node
-                };
-                let end_renderable = ShapeRenderable {
-                    shape: PrimShape::Circle(CircleShape {
-                        position: self.end.to_float(),
-                        diameter: self.trace_width,
-                    }),
-                    color: [0.0, 1.0, 0.0, 1.0], // green end node
-                };
-                render_model.pad_shape_renderables.push(start_renderable);
-                render_model.pad_shape_renderables.push(end_renderable);
-                pcb_render_model.update_pcb_render_model(render_model);
-                block_or_sleep();
-            };
         if DISPLAY_ASTAR {
-            display_and_block(&frontier); // display the initial state of the frontier
+            self.display_and_block(pcb_render_model.clone(), &frontier); // display the initial state of the frontier
         }
 
         let max_trials: usize = 200;
@@ -818,7 +832,7 @@ impl AStarModel {
             if current_node.position == self.end {
                 frontier.push(item); // push the current node back to the frontier, so that it can be displayed
                 if DISPLAY_ASTAR {
-                    display_and_block(&frontier); // display the initial state of the frontier
+                    self.display_and_block(pcb_render_model.clone(), &frontier); // display the initial state of the frontier
                 }
                 // Reached the end node, construct the trace path
                 let trace_path = current_node.to_trace_path(self.trace_width, self.trace_clearance);
@@ -875,8 +889,10 @@ impl AStarModel {
             let mut condition_flag = false;
             let mut condition_count = 0;
 
+
+            
             let end_direction = self.is_aligned_with_end(&current_node.position);
-            if !end_direction.is_none() {
+            if let Some(end_direction) = end_direction {
                 assert_ne!(current_node.position, self.end, "assert 3");
                 if !self.check_collision(
                     current_node.position,
@@ -889,99 +905,44 @@ impl AStarModel {
                         current_node.position.x, current_node.position.y, self.end.x, self.end.y
                     );
                     condition_count = condition_count + 1;
-                    try_push_node_to_frontier(end_direction.unwrap(), self.end);
+                    try_push_node_to_frontier(end_direction, self.end);
                 }
             }
 
-            let grid_directions = self.directions_to_grid_points(&current_node.position);
-            if self.is_grid_point(&current_node.position) {
+            // process grid points or one-step-to-grid-points
+            let directions = self.directions_to_grid_points(&current_node.position);
+            assert!(directions.len() != 8 || self.is_grid_point(&current_node.position), "There should not be 8 directions to grid points if the current position is not a grid point");
+            for (direction, end_position) in &directions {
                 condition_flag = true;
-                for direction in Direction::all_directions() {
-                    let mut end_position =
-                        current_node.position + direction.to_fixed_vec2(*ASTAR_STRIDE);
-                    assert_ne!(current_node.position, end_position, "assert 4");
-                    if self.check_collision(
-                        current_node.position,
-                        end_position,
-                        self.trace_width,
-                        self.trace_clearance,
-                    ) {
-                        let temp_end = self
-                            .binary_approach_to_obstacles(&current_node.position, &end_position);
-                        if temp_end.is_none() {
-                            continue;
-                        }
-                        end_position = temp_end.unwrap();
-                    }
-                    // println!("is_grid_point: {}, {}", end_position.x, end_position.y);
-                    condition_count = condition_count + 1;
-                    try_push_node_to_frontier(direction, end_position);
-                    let max_length = FixedPoint::max(
-                        (current_node.position.x - end_position.x).abs(),
-                        (current_node.position.y - end_position.y).abs(),
-                    );
-                    if self.is_aligned_with_end(&current_node.position).is_none() {
-                        let temp_end = self.get_intersection_with_end_alignments(
-                            &current_node.position,
-                            direction,
-                            max_length,
-                        );
-                        if !temp_end.is_none() {
-                            // println!(
-                            //     "get_intersection_with_end_alignments: {}, {}",
-                            //     temp_end.unwrap().x,
-                            //     temp_end.unwrap().y
-                            // );
-                            condition_count = condition_count + 1;
-                            try_push_node_to_frontier(direction, temp_end.unwrap());
-                        }
-                    }
-                }
-            } else if !grid_directions.is_empty() {
-                condition_flag = true;
-                for (direction, mut end_position) in grid_directions {
-                    assert_ne!(current_node.position, end_position, "assert 5");
+                assert_ne!(current_node.position, *end_position, "assert 5");
 
-                    if self.check_collision(
-                        current_node.position,
-                        end_position,
-                        self.trace_width,
-                        self.trace_clearance,
-                    ) {
-                        let temp_end = self
-                            .binary_approach_to_obstacles(&current_node.position, &end_position);
-                        if temp_end.is_none() {
-                            continue;
-                        }
-                        end_position = temp_end.unwrap();
-                    }
-                    // println!(
-                    //     "directions_to_grid_points: {}, {}",
-                    //     end_position.x, end_position.y
-                    // );
-                    condition_count = condition_count + 1;
-                    try_push_node_to_frontier(direction, end_position);
-                    let max_length = FixedPoint::max(
-                        (current_node.position.x - end_position.x).abs(),
-                        (current_node.position.y - end_position.y).abs(),
-                    );
-                    if self.is_aligned_with_end(&current_node.position).is_none() {
-                        let temp_end = self.get_intersection_with_end_alignments(
-                            &current_node.position,
-                            direction,
-                            max_length,
-                        );
-                        if !temp_end.is_none() {
-                            // println!(
-                            //     "get_intersection_with_end_alignments: {}, {}",
-                            //     temp_end.unwrap().x,
-                            //     temp_end.unwrap().y
-                            // );
-                            condition_count = condition_count + 1;
-                            try_push_node_to_frontier(direction, temp_end.unwrap());
-                        }
-                    }
-                }
+                let end_position = match self.clamp_by_collision(current_node.position, *end_position){
+                    Some(pos) => pos,
+                    None => continue, // if clamping fails, skip this direction
+                };
+                condition_count = condition_count + 1;
+                try_push_node_to_frontier(*direction, end_position);
+                // let max_length = FixedPoint::max(
+                //     (current_node.position.x - end_position.x).abs(),
+                //     (current_node.position.y - end_position.y).abs(),
+                // );
+                // if self.is_aligned_with_end(&current_node.position).is_none() {
+                //     let temp_end = self.get_intersection_with_end_alignments(
+                //         &current_node.position,
+                //         direction,
+                //         max_length,
+                //     );
+                //     if !temp_end.is_none() {
+                //         // println!(
+                //         //     "get_intersection_with_end_alignments: {}, {}",
+                //         //     temp_end.unwrap().x,
+                //         //     temp_end.unwrap().y
+                //         // );
+                //         condition_count = condition_count + 1;
+                //         try_push_node_to_frontier(direction, temp_end.unwrap());
+                //     }
+                // }
+                self.get_intersection_with_end_alignments(position, direction, max_length)
             }
 
             let radial_directions = self.radial_directions_wrt_obstacles(&current_node.position);
@@ -998,45 +959,32 @@ impl AStarModel {
                     self.to_nearest_one_step_point(&current_node.position, direction);
                 assert_ne!(current_node.position, end_position, "assert 6");
 
-                if self.check_collision(
-                    current_node.position,
-                    end_position,
-                    self.trace_width,
-                    self.trace_clearance,
-                ) {
-                    let temp_end =
-                        self.binary_approach_to_obstacles(&current_node.position, &end_position);
-                    if temp_end.is_none() {
-                        continue;
-                    }
-                    end_position = temp_end.unwrap();
-                }
-                // println!(
-                //     "radial_directions_wrt_obstacles: {}, {}",
-                //     end_position.x, end_position.y
-                // );
+                let end_position = match self.clamp_by_collision(current_node.position, end_position){
+                    Some(pos) => pos,
+                    None => continue, // if clamping fails, skip this direction
+                };
                 condition_count = condition_count + 1;
                 try_push_node_to_frontier(direction, end_position);
-                let max_length = FixedPoint::max(
-                    (current_node.position.x - end_position.x).abs(),
-                    (current_node.position.y - end_position.y).abs(),
-                );
-                if self.is_aligned_with_end(&current_node.position).is_none() {
-                    let temp_end = self.get_intersection_with_end_alignments(
-                        &current_node.position,
-                        direction,
-                        max_length,
-                    );
-                    if !temp_end.is_none() {
-                        // println!(
-                        //     "radial_directions_wrt_obstacles: {}, {}",
-                        //     temp_end.unwrap().x,
-                        //     temp_end.unwrap().y
-                        // );
-                        condition_count = condition_count + 1;
-                        try_push_node_to_frontier(direction, temp_end.unwrap());
-                    }
-                }
+                // let max_length = FixedPoint::max(
+                //     (current_node.position.x - end_position.x).abs(),
+                //     (current_node.position.y - end_position.y).abs(),
+                // );
+                // if self.is_aligned_with_end(&current_node.position).is_none() {
+                //     let temp_end = self.get_intersection_with_end_alignments(
+                //         &current_node.position,
+                //         direction,
+                //         max_length,
+                //     );
+                //     if !temp_end.is_none() {
+                //         // println!(
+                //         //     "radial_directions_wrt_obstacles: {}, {}",
+                //         //     temp_end.unwrap().x,
+                //         //     temp_end.unwrap().y
+                //         // );
+                //         condition_count = condition_count + 1;
+                //         try_push_node_to_frontier(direction, temp_end.unwrap());
+                //     }
+                // }
             }
 
             if !condition_flag {
@@ -1101,7 +1049,7 @@ impl AStarModel {
             //     frontier.len()
             // );
             if DISPLAY_ASTAR {
-                display_and_block(&frontier); // display the initial state of the frontier
+                self.display_and_block(pcb_render_model.clone(), &frontier); // display the initial state of the frontier
             }
         }
         Err("No path found".to_string()) // no path found
