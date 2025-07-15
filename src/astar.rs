@@ -31,6 +31,8 @@ pub struct AStarModel {
     pub border_cache: RefCell<Option<Rc<Vec<PrimShape>>>>,
 }
 
+
+
 impl AStarModel {
     fn get_border_shapes(&self) -> Rc<Vec<PrimShape>> {
         if let Some(border_shapes) = self.border_cache.borrow().as_ref() {
@@ -628,6 +630,143 @@ impl AStarModel {
         assert!(!end_position.is_x_odd_y_odd(), "End position should not be odd-odd, but got: {:?}", end_position);
         Some(end_position)
     }
+
+    
+    fn is_axis(&self, d: (FixedPoint, FixedPoint)) -> bool {
+        (d.0 == 0.0 && d.1 != 0.0) || (d.0 != 0.0 && d.1 == 0.0)
+    }
+
+    fn is_diagonal(&self, d: (FixedPoint, FixedPoint)) -> bool {
+        d.0 != 0.0 && d.1 != 0.0 && d.0.abs() == d.1.abs()
+    }
+
+    fn rebuild_segments(&self,anchors: &Vec<FixedVec2>, width: f32, clearance: f32) -> Vec<TraceSegment> {
+        let mut segments = Vec::new();
+        for i in 0..anchors.len() - 1 {
+            let start = anchors[i];
+            let end = anchors[i + 1];
+            assert_ne!(start, end, "Start and end positions should not be the same");
+            let segment = TraceSegment {
+                start,
+                end,
+                width,
+                clearance,
+            };
+            segments.push(segment);
+        }
+        segments
+    }
+
+    fn optimize_path(
+        &self,
+        trace_path: &TracePath,
+    ) -> TracePath {
+        let path = &trace_path.anchors.0;
+        let length = trace_path.length;
+        if path.len() < 4 {
+            return trace_path.clone();
+        }
+
+        let mut optimized = path.clone();
+        let mut i = 0;
+        while i < optimized.len() - 3 { // trace shifting
+            let seg1 = (&optimized[i], &optimized[i + 1]);
+            let seg2 = (&optimized[i + 2], &optimized[i + 3]);
+
+            let dx1 = seg1.1.x - seg1.0.x;
+            let dy1 = seg1.1.y - seg1.0.y;
+            let dx2 = seg2.1.x - seg2.0.x;
+            let dy2 = seg2.1.y - seg2.0.y;
+
+            if dx1 * dy2 == dx2 * dy1 {
+                let mut success = false;
+                let new_point1 = FixedVec2 {
+                    x: seg1.0.x + seg2.0.x - seg1.1.x,
+                    y: seg1.0.y + seg2.0.y - seg1.1.y,
+                };
+                let new_point2 = FixedVec2 {
+                    x: seg2.1.x - seg2.0.x + seg1.1.x,
+                    y: seg2.1.y - seg2.0.y + seg1.1.y,
+                };
+
+                let flag1 = !self.check_collision(optimized[i], new_point1, self.trace_width, self.trace_clearance)
+                    && !self.check_collision(new_point1, optimized[i + 2], self.trace_width, self.trace_clearance);
+                let flag2 = !self.check_collision(optimized[i + 1], new_point2, self.trace_width, self.trace_clearance)
+                    && !self.check_collision(new_point2, optimized[i + 3], self.trace_width, self.trace_clearance);
+
+                if flag1 {
+                    optimized[i + 1] = new_point1;
+                    success = true;
+                } else if flag2 {
+                    optimized[i + 2] = new_point2;
+                    success = true;
+                }
+
+                if success {
+                    i += 3;
+                    continue;
+                }
+            }
+            i += 1;
+        }
+
+        i = 1;
+        while i < optimized.len() - 2 { // tight wrapping
+            let p0 = optimized[i - 1];
+            let p1 = optimized[i];
+            let p2 = optimized[i + 1];
+            let p3 = optimized[i + 2];
+
+            let d01 = (p1.x - p0.x, p1.y - p0.y);
+            let d12 = (p2.x - p1.x, p2.y - p1.y);
+            let d23 = (p3.x - p2.x, p3.y - p2.y);
+
+            if (self.is_axis(d01) && self.is_diagonal(d12) && self.is_axis(d23) && (d01.0 * d23.0 == FixedPoint::ZERO)) ||  // vertical-diagonal-horizontal or horizontal-diagonal-vertical
+           (self.is_diagonal(d01) && self.is_axis(d12) && self.is_diagonal(d23) && ((d01.0.signum() != d23.0.signum()) || (d01.1.signum() != d23.1.signum()))){  // diagonal-axis-diagonal with different directions {
+
+                let len_d01 = FixedPoint::max(d01.0.abs(), d01.1.abs());
+                let len_d23 = FixedPoint::max(d23.0.abs(), d23.1.abs());
+                let max_length = FixedPoint::min(len_d01, len_d23);
+                let num_steps = (max_length / FixedPoint::DELTA).ceil().to_num();
+
+
+                for step_idx in 0..=num_steps {
+                    let step = FixedPoint::from_num(step_idx) * FixedPoint::DELTA;
+                    let step = FixedPoint::min(step, max_length);
+                    
+                    let new_point1 = FixedVec2 {
+                        x: p1.x - d01.0 * (max_length - step) / len_d01,
+                        y: p1.y - d01.1 * (max_length - step) / len_d01,
+                    };
+                    let new_point2 = FixedVec2 {
+                        x: p2.x + d23.0 * (max_length - step) / len_d23,
+                        y: p2.y + d23.1 * (max_length - step) / len_d23,
+                    };
+
+                    if !self.check_collision(p0, new_point1, self.trace_width, self.trace_clearance)
+                        && !self.check_collision(new_point1, new_point2, self.trace_width, self.trace_clearance)
+                        && !self.check_collision(new_point2, p3, self.trace_width, self.trace_clearance)
+                    {
+                        // todo: edit length
+                        optimized[i] = new_point1;
+                        optimized[i + 1] = new_point2;
+                        break;
+                    }
+                }
+            }
+            i += 1;
+        }
+        let segments = self.rebuild_segments(&optimized, self.trace_width, self.trace_clearance);
+        TracePath {
+            anchors: TraceAnchors(optimized),
+            segments,
+            length: length,
+        }
+    }
+
+
+
+
 
     // 1. 整点/走一步到整点 -> 整点，或被障碍物挡住
     // 2. 走两步到整点+贴着障碍物 -> 对每个方向，走到最近的“走一步到整点”，或被障碍物挡住
